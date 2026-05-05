@@ -115,7 +115,7 @@ jobs:
           $amdSha = (Get-FileHash "dist\helium-sync-windows-$tag-amd64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           $armSha = (Get-FileHash "dist\helium-sync-windows-$tag-arm64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
 
-          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest = Get-Content "scoop\helium-sync.json" -Raw | ConvertFrom-Json
           $manifest.version = $version
           $manifest.architecture."64bit".url = "$base/helium-sync-windows-$tag-amd64.zip"
           $manifest.architecture."64bit".hash = "sha256:$amdSha"
