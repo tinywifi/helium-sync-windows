@@ -13,38 +13,33 @@ body:
     validations:
       required: true
 
-  - type: markdown
-    attributes:
-      value: |
-        **Environment info** — paste the output of these commands.
-
   - type: textarea
     id: version
     attributes:
-      label: `helium-sync version`
+      label: helium-sync version
       description: Run `helium-sync version` in your terminal
       placeholder: "e.g. v0.2.0, git e7661bc, Python 3.12.4"
-      render: text
+      render: shell
     validations:
       required: true
 
   - type: textarea
     id: doctor
     attributes:
-      label: `helium-sync doctor`
+      label: helium-sync doctor
       description: Run `helium-sync doctor` in your terminal
       placeholder: "Paste the full output here"
-      render: text
+      render: shell
     validations:
       required: true
 
   - type: textarea
     id: status
     attributes:
-      label: `helium-sync status`
+      label: helium-sync status
       description: Run `helium-sync status` in your terminal
       placeholder: "Paste the output here"
-      render: text
+      render: shell
 
   - type: dropdown
     id: install_method
@@ -74,7 +69,7 @@ body:
       label: Error output
       description: Paste the full output or traceback
       placeholder: "..."
-      render: text
+      render: shell
     validations:
       required: true
 
@@ -105,8 +100,8 @@ body:
     attributes:
       label: Did this work before on this machine?
       options:
-        - Yes, since version ___
-        - No, first time running
+        - "Yes, since version ___"
+        - "No, first time running"
     validations:
       required: true
 

@@ -27,19 +27,16 @@ body:
       label: How might it fit?
       description: If you've thought about implementation: which Target module? Does it need new Helium-side reads/writes?
 
-  - type: markdown
+  - type: checkboxes
+    id: scope_confirm
     attributes:
-      value: |
-        **Scope check** — helium-sync deliberately declines:
+      label: This request does NOT overlap with any declined items
+      description: |
+        helium-sync deliberately declines:
         - Linux / macOS support (Windows-only; upstream is macOS)
         - Bidirectional *automatic* merge (manual resolution via `resolve`)
         - Browser-extension form factor
         - History/cookies/passwords/extensions/settings sync
-
-  - type: checkboxes
-    id: scope_confirm
-    attributes:
-      label: This request does NOT overlap with any of the above declined items
       options:
-        - label: "I confirm this falls within project scope"
+        - label: I confirm this falls within project scope
           required: true
