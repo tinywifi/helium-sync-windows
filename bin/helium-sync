@@ -713,6 +713,9 @@ def _walk_urls_rec(node):
 def cmd_push(args) -> int:
     log(f"=== push from {hostname()} ===")
 
+    if getattr(args, "dry_run", False):
+        return _push_dry_run(args)
+
     has_upstream = _has_upstream()
 
     if has_upstream:
@@ -820,6 +823,9 @@ def cmd_push(args) -> int:
 
 def cmd_pull(args) -> int:
     log(f"=== pull on {hostname()} ===")
+
+    if getattr(args, "dry_run", False):
+        return _pull_dry_run(args)
 
     if not args.allow_helium_running and helium_running():
         print("ERROR: Helium is running on this device.")
@@ -1051,6 +1057,436 @@ def cmd_import(args) -> int:
     return 0
 
 
+def _push_dry_run(args) -> int:
+    """Show what would change during push without committing or pushing."""
+    log(f"=== push dry-run from {hostname()} ===")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    any_change = False
+    for target in ALL_TARGETS:
+        if getattr(args, "target", None) and target.name != args.target:
+            continue
+        try:
+            data = target.extract(args.profile)
+        except Exception as e:
+            log(f"  extract {target.name} failed: {e}")
+            return 2
+
+        if target.name == "bookmarks":
+            issues = _validate_bookmarks(data)
+        elif target.name == "saved_tab_groups":
+            issues = _validate_tab_groups(data)
+        else:
+            issues = []
+        if issues:
+            for issue in issues:
+                log(f"  {target.name} WARNING: {issue}")
+
+        state_file = STATE_DIR / target.state_filename
+        text = target.serialize(data)
+        prev = state_file.read_text() if state_file.exists() else None
+        if text != prev:
+            any_change = True
+            log(f"  {target.name}: WOULD UPDATE ({_summary(target, data)})")
+            if prev:
+                prev_size = len(prev)
+                delta = len(text) - prev_size
+                log(f"    size: {prev_size} -> {len(text)} bytes ({delta:+d})")
+            else:
+                log(f"    new file: {len(text)} bytes")
+        else:
+            log(f"  {target.name}: unchanged")
+
+    if not any_change:
+        log("no changes to push")
+    else:
+        log("would commit and push changes")
+        if not _has_upstream() and _has_remote():
+            log("  (would set upstream: git push -u origin main)")
+        elif not _has_remote():
+            log("  (local commit only -- no remote configured)")
+    print("(dry run -- pass without --dry-run to actually commit and push)")
+    return 0
+
+
+def _pull_dry_run(args) -> int:
+    """Show what would change during pull without pulling or writing."""
+    log(f"=== pull dry-run on {hostname()} ===")
+    log("would: git pull --rebase")
+
+    n_would_apply = 0
+    for target in ALL_TARGETS:
+        if getattr(args, "target", None) and target.name != args.target:
+            continue
+        state_file = STATE_DIR / target.state_filename
+        if not state_file.exists():
+            log(f"  {target.name}: no canonical state -- would skip")
+            continue
+        try:
+            data = target.deserialize(state_file.read_text())
+            n_would_apply += 1
+            log(f"  {target.name}: would apply ({_summary(target, data)})")
+        except Exception as e:
+            log(f"  {target.name}: would fail -- {e}")
+
+    if n_would_apply == 0:
+        log("nothing to pull")
+    else:
+        log(f"would apply {n_would_apply} target(s)")
+        log("would backup current profile to logs/prePull.<timestamp>/")
+    print("(dry run -- pass without --dry-run to actually pull and write to profile)")
+    return 0
+
+
+_BACKUP_RESTORE_PATTERN = re.compile(r"^(prePull|preImport|preSync)\.(\d{8}-\d{6})$")
+
+
+def cmd_restore(args) -> int:
+    """Restore profile from the latest backup in logs/."""
+    if not LOGS_DIR.exists():
+        print("no logs/ directory -- no backups to restore from")
+        return 1
+
+    if not args.allow_helium_running and helium_running():
+        print("ERROR: Helium is running on this device.")
+        print("Restore writes to your Helium profile; close Helium first.")
+        print("(Or, for testing: --allow-helium-running)")
+        return 4
+
+    backups = []
+    for entry in LOGS_DIR.iterdir():
+        if not entry.is_dir():
+            continue
+        m = _BACKUP_RESTORE_PATTERN.match(entry.name)
+        if m:
+            try:
+                ts = datetime.strptime(m.group(2), "%Y%m%d-%H%M%S")
+                backups.append((entry, ts))
+            except ValueError:
+                continue
+
+    if not backups:
+        print("no backups found in logs/ (looked for prePull.*, preImport.*, preSync.*)")
+        return 1
+
+    backups.sort(key=lambda x: x[1], reverse=True)
+    latest, ts = backups[0]
+    print(f"restoring from latest backup: {latest.name}")
+    print(f"  backup time: {ts:%Y-%m-%d %H:%M:%S}")
+    print(f"  files: {[f.name for f in latest.iterdir()]}")
+    print()
+
+    restored = 0
+    for src in latest.iterdir():
+        if src.is_file():
+            dst = args.profile / src.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(dst))
+            print(f"  restored {src.name} -> {dst}")
+            restored += 1
+
+    if restored == 0:
+        print("no files found in backup directory")
+        return 1
+
+    print(f"\nrestored {restored} file(s). Launch Helium to see the restored state.")
+    return 0
+
+
+def cmd_resolve(args) -> int:
+    """Interactively merge divergent bookmark states."""
+    import msvcrt
+
+    if args.theirs:
+        theirs_path = Path(args.theirs).expanduser().resolve()
+        if not theirs_path.exists():
+            print(f"file not found: {theirs_path}")
+            return 1
+        try:
+            theirs_data = json.loads(theirs_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"cannot parse file: {e}")
+            return 1
+    else:
+        state_file = STATE_DIR / "bookmarks.json"
+        if not state_file.exists():
+            print("no canonical bookmarks state -- nothing to resolve against")
+            return 1
+        theirs_data = json.loads(state_file.read_text())
+
+    try:
+        live_data = None
+        for t in ALL_TARGETS:
+            if t.name == "bookmarks" or (live_data is None and "bookmark" in t.name.lower()):
+                live_data = t.extract(args.profile)
+                break
+        if live_data is None:
+            print("no bookmarks target found")
+            return 2
+    except Exception as e:
+        print(f"cannot extract live bookmarks: {e}")
+        return 2
+
+    # Build URL maps
+    def url_map(tree):
+        result = {}
+        for node in _walk_urls(tree):
+            url = node.get("url", "")
+            result[url] = node
+        return result
+
+    live_urls = url_map(live_data)
+    theirs_urls = url_map(theirs_data)
+
+    live_only = set(live_urls) - set(theirs_urls)
+    theirs_only = set(theirs_urls) - set(live_urls)
+    common = set(live_urls) & set(theirs_urls)
+
+    # Check for conflicts in common URLs (different name/parent)
+    conflicts = []
+    for url in sorted(common):
+        l = live_urls[url]
+        t = theirs_urls[url]
+        if l.get("name") != t.get("name"):
+            conflicts.append(url)
+
+    if not live_only and not theirs_only and not conflicts:
+        print("no divergences found -- live and canonical are identical")
+        return 0
+
+    print(f"divergences found:")
+    print(f"  only on this device: {len(live_only)} bookmark(s)")
+    print(f"  only in canonical:   {len(theirs_only)} bookmark(s)")
+    print(f"  name conflicts:      {len(conflicts)} bookmark(s)")
+    print()
+
+    if not sys.stdin.isatty():
+        print("(resolve requires an interactive terminal)")
+        print("Run: helium-sync pull --dry-run   to see what would change")
+        return 1
+
+    # Interactive TUI
+    items = []
+    for url in sorted(live_only):
+        items.append({
+            "url": url,
+            "name": live_urls[url].get("name", "(untitled)"),
+            "source": "local",
+            "keep": True,
+            "conflict": False,
+        })
+    for url in sorted(theirs_only):
+        items.append({
+            "url": url,
+            "name": theirs_urls[url].get("name", "(untitled)"),
+            "source": "canonical",
+            "keep": True,
+            "conflict": False,
+        })
+    for url in sorted(conflicts):
+        items.append({
+            "url": url,
+            "name": live_urls[url].get("name", "(untitled)"),
+            "theirs_name": theirs_urls[url].get("name", "(untitled)"),
+            "source": "conflict",
+            "keep": True,
+            "keep_theirs": False,
+            "conflict": True,
+        })
+
+    cursor = 0
+    print("Resolve divergences (↑↓ navigate, Space toggle, Enter resolve, Q quit)")
+    print("-" * 70)
+
+    def render():
+        os.system("cls" if os.name == "nt" else "clear")
+        print("Resolve divergences (↑↓ navigate, Space toggle, Enter resolve, Q quit)")
+        print("-" * 70)
+        for i, item in enumerate(items):
+            arrow = ">> " if i == cursor else "   "
+            sel = "[*]" if item["keep"] else "[ ]"
+            src = item["source"]
+            if src == "conflict":
+                local_name = item.get("name", "?")
+                theirs_name = item.get("theirs_name", "?")
+                theirs_sel = "[*]" if item.get("keep_theirs", False) else "[ ]"
+                print(f"{arrow}{sel} LOCAL:  {local_name}")
+                print(f"      {theirs_sel} THEIRS: {theirs_name}")
+                print(f"      {item['url'][:65]}")
+            else:
+                print(f"{arrow}{sel} [{src:^10s}] {item['name']}")
+                print(f"      {item['url'][:65]}")
+        print("-" * 70)
+        print(f"{len(items)} items | Enter=resolve | Q=quit")
+
+    render()
+    while True:
+        try:
+            key = msvcrt.getch()
+        except (KeyboardInterrupt, EOFError):
+            print("\naborted")
+            return 7
+
+        if key == b"\xe0":  # arrow keys
+            key = msvcrt.getch()
+            if key == b"H" and cursor > 0:
+                cursor -= 1
+            elif key == b"P" and cursor < len(items) - 1:
+                cursor += 1
+        elif key == b" ":
+            item = items[cursor]
+            if item["conflict"]:
+                item["keep_theirs"] = not item.get("keep_theirs", False)
+            else:
+                item["keep"] = not item["keep"]
+        elif key in (b"\r", b"\n"):
+            break
+        elif key.lower() == b"q":
+            print("\nquit without changes")
+            return 0
+        render()
+
+    # Apply resolution: rebuild bookmark tree
+    new_roots = {}
+    for root_key, root_node in live_data.get("roots", {}).items():
+        new_root = _merge_bookmark_tree(root_node, live_urls, theirs_urls, items)
+        new_roots[root_key] = new_root
+
+    merged = {
+        "roots": new_roots,
+        "checksum": "",
+        "version": live_data.get("version", 1),
+    }
+
+    # Backup before write
+    backup_root = LOGS_DIR / f"preSync.{now_stamp()}"
+    backup_root.mkdir(parents=True, exist_ok=True)
+    bm_file = args.profile / "Bookmarks"
+    if bm_file.exists():
+        shutil.copy2(str(bm_file), str(backup_root / "Bookmarks"))
+
+    try:
+        _apply_bookmarks(args.profile, merged, backup_root)
+    except Exception as e:
+        print(f"failed to write merged bookmarks: {e}")
+        return 2
+
+    kept_local = sum(1 for i in items if i["source"] == "local" and i["keep"])
+    kept_theirs = sum(1 for i in items if i["source"] == "canonical" and i["keep"])
+    print(f"\nresolved: kept {kept_local} local + {kept_theirs} canonical bookmark(s)")
+    print(f"backup: {backup_root.relative_to(REPO_ROOT)}")
+    return 0
+
+
+def _merge_bookmark_tree(node, live_urls, theirs_urls, items):
+    """Rebuild a bookmark tree keeping only selected items."""
+    new_node = dict(node)
+    children = []
+    for child in node.get("children", []):
+        if child.get("type") == "url":
+            url = child.get("url", "")
+            item = next((i for i in items if i["url"] == url), None)
+            if item is None:
+                children.append(child)
+            elif item["source"] == "local" and item["keep"]:
+                children.append(child)
+            elif item["source"] == "canonical" and item["keep"]:
+                children.append(child)
+            elif item["source"] == "conflict":
+                if item.get("keep_theirs", False):
+                    tc = dict(child)
+                    tc["name"] = item.get("theirs_name", child.get("name", ""))
+                    children.append(tc)
+                elif item["keep"]:
+                    children.append(child)
+            # else: dropped
+        elif child.get("type") == "folder":
+            merged = _merge_bookmark_tree(child, live_urls, theirs_urls, items)
+            if merged.get("children"):
+                children.append(merged)
+    new_node["children"] = children
+    return new_node
+
+
+def cmd_completion(args) -> int:
+    """Generate shell completion script."""
+    subs = ["setup", "push", "pull", "status", "diff", "doctor", "version",
+            "log", "gc", "init", "adopt", "export", "import", "restore",
+            "resolve", "completion"]
+
+    flags_by_sub = {
+        "setup": ["--force", "--yes", "-y", "--profile", "--repo"],
+        "push": ["--target", "--strict", "--dry-run", "--profile", "--repo"],
+        "pull": ["--allow-helium-running", "--target", "--dry-run", "--profile", "--repo"],
+        "status": ["--target", "--profile", "--repo"],
+        "diff": ["--target", "--profile", "--repo"],
+        "doctor": ["--profile", "--repo"],
+        "version": [],
+        "log": ["-n", "--profile", "--repo"],
+        "gc": ["--keep-days", "--dry-run", "--profile", "--repo"],
+        "init": ["--force", "--profile", "--repo"],
+        "adopt": ["--yes", "-y", "--allow-helium-running", "--profile", "--repo"],
+        "export": ["--output", "--target", "--profile", "--repo"],
+        "import": ["--allow-helium-running", "--target", "--profile", "--repo"],
+        "restore": ["--allow-helium-running", "--profile", "--repo"],
+        "resolve": ["--theirs", "--profile", "--repo"],
+        "completion": ["--shell", "--profile", "--repo"],
+    }
+
+    if args.shell == "powershell":
+        _gen_powershell_completion(subs, flags_by_sub)
+    elif args.shell == "cmd":
+        _gen_cmd_completion(subs)
+    return 0
+
+
+def _gen_powershell_completion(subs, flags_by_sub):
+    sub_lines = "\n".join(f'        "{s}"' for s in subs)
+    flag_lines = []
+    for s in subs:
+        fl = ", ".join(f'"{f}"' for f in flags_by_sub.get(s, []))
+        flag_lines.append(f'        "{s}" = @({fl})')
+    flags_block = "\n".join(flag_lines)
+
+    script = f"""$scriptBlock = {{
+    param($wordToComplete, $commandAst, $cursorPosition)
+
+    $commandElements = $commandAst.CommandElements
+    $subcommands = @(
+{sub_lines}
+    )
+    $globalFlags = @("--profile", "--repo", "--help", "-h")
+
+    if ($commandElements.Count -le 2) {{
+        $subcommands | Where-Object {{ $_ -like "$wordToComplete*" }}
+        return
+    }}
+
+    $subcommand = $commandElements[2].Value
+    $flags = @(
+{flags_block}
+    )
+
+    if ($flags.ContainsKey($subcommand)) {{
+        $flags[$subcommand] | Where-Object {{ $_ -like "$wordToComplete*" }}
+    }}
+}}
+
+Register-ArgumentCompleter -CommandName helium-sync -ScriptBlock $scriptBlock
+Register-ArgumentCompleter -CommandName helium-sync.bat -ScriptBlock $scriptBlock"""
+    print(script)
+
+
+def _gen_cmd_completion(subs):
+    print("@echo off")
+    print("REM helium-sync DOSKEY macros for cmd.exe")
+    print("REM Usage: helium-sync <TAB>")
+    print("REM Note: DOSKEY doesn't support subcommand completion natively.")
+    print("REM For best experience, use PowerShell completion instead.")
+    print()
+    for s in subs:
+        print(f"doskey helium-sync {s}=helium-sync {s} $*")
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────────────
@@ -1091,12 +1527,16 @@ def main() -> int:
                         help="sync only this target (e.g. bookmarks, saved_tab_groups)")
     p_push.add_argument("--strict", action="store_true",
                         help="fail on validation warnings")
+    p_push.add_argument("--dry-run", action="store_true",
+                        help="show what would change without committing or pushing")
 
     p_pull = sub.add_parser("pull", help="origin -> repo -> live profile")
     p_pull.add_argument("--allow-helium-running", action="store_true",
                         help="DANGEROUS -- bypass the running-browser guard")
     p_pull.add_argument("--target", type=str, default=None,
                         help="sync only this target (e.g. bookmarks, saved_tab_groups)")
+    p_pull.add_argument("--dry-run", action="store_true",
+                        help="show what would change without pulling or writing to profile")
 
     p_init = sub.add_parser("init", help="first-time: this device is the truth")
     p_init.add_argument("--force", action="store_true",
@@ -1129,7 +1569,19 @@ def main() -> int:
     p_import.add_argument("--allow-helium-running", action="store_true",
                           help="DANGEROUS -- bypass the running-browser guard")
     p_import.add_argument("--target", type=str, default=None,
-                          help="import only this target (e.g. bookmarks)")
+                           help="import only this target (e.g. bookmarks)")
+
+    p_restore = sub.add_parser("restore", help="restore profile from latest backup")
+    p_restore.add_argument("--allow-helium-running", action="store_true",
+                            help="DANGEROUS -- bypass the running-browser guard")
+
+    p_resolve = sub.add_parser("resolve", help="interactively merge divergent bookmark states")
+    p_resolve.add_argument("--theirs", type=str, default=None,
+                            help="path to theirs canonical JSON")
+
+    p_completion = sub.add_parser("completion", help="generate shell completion script")
+    p_completion.add_argument("--shell", required=True, choices=["powershell", "cmd"],
+                              help="shell to generate completions for")
 
     args = parser.parse_args()
 
@@ -1154,6 +1606,9 @@ def main() -> int:
         "log":    cmd_log,
         "export": cmd_export,
         "import": cmd_import,
+        "restore": cmd_restore,
+        "resolve": cmd_resolve,
+        "completion": cmd_completion,
     }[args.cmd]
     return handler(args) or 0
 

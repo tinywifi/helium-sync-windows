@@ -78,6 +78,22 @@ helium-sync adopt     lower-level: bootstrap on a new device receiving canonical
 helium-sync gc        prune logs/ backups older than 30 days (--keep-days, --dry-run)
 ```
 
+### safety & recovery
+
+```
+helium-sync push --dry-run    show what would change without committing or pushing
+helium-sync pull --dry-run    show what would change without pulling or writing
+helium-sync restore           restore profile from latest backup (prePull/preImport/preSync)
+helium-sync resolve           interactively merge divergent bookmark states (--theirs file.json)
+```
+
+### shell completion
+
+```
+helium-sync completion --shell powershell    generate PowerShell tab completion
+helium-sync completion --shell cmd           generate DOSKEY macros for cmd.exe
+```
+
 ### shared flags
 
 `--target <name>` — limit push, pull, status, diff, export, or import to one target
