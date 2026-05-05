@@ -298,5 +298,109 @@ class TestDoctorCommand(unittest.TestCase):
         self.assertIn("[ok] repo git", result.stdout)
 
 
+# --------------------------------------------------------------------------- #
+# Validation tests
+# --------------------------------------------------------------------------- #
+
+def _bm_tree(bookmark_bar=None):
+    return {
+        "checksum": "",
+        "version": 1,
+        "roots": {
+            "bookmark_bar": {
+                "type": "folder", "name": "Bookmarks Bar",
+                "children": bookmark_bar or [],
+            },
+            "other": {"type": "folder", "name": "Other", "children": []},
+            "synced": {"type": "folder", "name": "Mobile", "children": []},
+        },
+    }
+
+
+def _bm_url(name, url):
+    return {"type": "url", "name": name, "url": url, "id": "0", "guid": "g"}
+
+
+class TestValidateBookmarks(unittest.TestCase):
+    def setUp(self):
+        self.cli = _import_cli()
+
+    def test_valid_tree_passes(self):
+        data = _bm_tree(bookmark_bar=[_bm_url("Test", "https://example.com")])
+        issues = self.cli._validate_bookmarks(data)
+        self.assertEqual(issues, [])
+
+    def test_missing_roots_fails(self):
+        issues = self.cli._validate_bookmarks({})
+        self.assertTrue(any("roots" in i for i in issues))
+
+    def test_empty_url_triggers_warning(self):
+        data = _bm_tree(bookmark_bar=[{"type": "url", "name": "Bad", "url": ""}])
+        issues = self.cli._validate_bookmarks(data)
+        self.assertTrue(any("empty URL" in i for i in issues))
+
+    def test_invalid_url_scheme_triggers_warning(self):
+        data = _bm_tree(bookmark_bar=[_bm_url("FTP", "ftp://files.example.com")])
+        issues = self.cli._validate_bookmarks(data)
+        self.assertTrue(any("unusual URL scheme" in i for i in issues))
+
+    def test_http_and_https_pass(self):
+        data = _bm_tree(bookmark_bar=[
+            _bm_url("HTTP", "http://example.com"),
+            _bm_url("HTTPS", "https://example.com"),
+        ])
+        issues = self.cli._validate_bookmarks(data)
+        self.assertFalse(any("scheme" in i for i in issues))
+
+    def test_deeply_nested_folders_pass(self):
+        deep = _bm_url("Deep", "https://deep.com")
+        for i in range(10):
+            deep = {"type": "folder", "name": f"L{i}", "children": [deep]}
+        data = _bm_tree(bookmark_bar=[deep])
+        issues = self.cli._validate_bookmarks(data)
+        self.assertEqual(issues, [])
+
+    def test_empty_tree_passes(self):
+        data = _bm_tree()
+        issues = self.cli._validate_bookmarks(data)
+        self.assertEqual(issues, [])
+
+
+class TestValidateTabGroups(unittest.TestCase):
+    def setUp(self):
+        self.cli = _import_cli()
+
+    def test_valid_data_passes(self):
+        data = {
+            "groups": {"g1": {"guid": "g1", "title": "Dev", "color": 1, "position": 0}},
+            "tabs": {"t1": {"guid": "t1", "group_guid": "g1", "url": "https://a.com",
+                            "title": "A", "position": 0}},
+        }
+        issues = self.cli._validate_tab_groups(data)
+        self.assertEqual(issues, [])
+
+    def test_missing_keys_fails(self):
+        issues = self.cli._validate_tab_groups({})
+        self.assertTrue(any("missing" in i for i in issues))
+
+    def test_tab_references_nonexistent_group(self):
+        data = {
+            "groups": {},
+            "tabs": {"t1": {"guid": "t1", "group_guid": "missing", "url": "https://a.com",
+                            "title": "A", "position": 0}},
+        }
+        issues = self.cli._validate_tab_groups(data)
+        self.assertTrue(any("non-existent group" in i for i in issues))
+
+    def test_invalid_url_scheme_in_tab(self):
+        data = {
+            "groups": {"g1": {"guid": "g1", "title": "G", "color": 1, "position": 0}},
+            "tabs": {"t1": {"guid": "t1", "group_guid": "g1", "url": "ftp://bad",
+                            "title": "B", "position": 0}},
+        }
+        issues = self.cli._validate_tab_groups(data)
+        self.assertTrue(any("unusual URL scheme" in i for i in issues))
+
+
 if __name__ == "__main__":
     unittest.main()
