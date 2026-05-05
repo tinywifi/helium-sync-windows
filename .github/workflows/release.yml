@@ -77,6 +77,13 @@ jobs:
         shell: pwsh
         run: Get-ChildItem dist\
 
+      - name: prepare release notes
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = (Get-Content ".github\release-notes-template.md" -Raw).Replace("{{TAG}}", $tag)
+          $notes | Set-Content "dist\release-notes.md" -Encoding utf8
+
       - name: publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -85,6 +92,7 @@ jobs:
             dist/leveldb-writer-windows-arm64.exe
             dist/helium-sync-windows-*-amd64.zip
             dist/helium-sync-windows-*-arm64.zip
+          body_path: dist/release-notes.md
           generate_release_notes: true
           fail_on_unmatched_files: true
 
