@@ -235,5 +235,45 @@ class TestTempRepoIntegration(unittest.TestCase):
             self.cli.ALL_TARGETS = old_targets
 
 
+class TestDoctorCommand(unittest.TestCase):
+    def test_doctor_passes_with_temp_profile_and_repo(self):
+        tmp = tempfile.TemporaryDirectory(prefix="helium-sync-doctor.")
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        profile = root / "profile"
+        repo = root / "repo"
+        (profile / "Default").mkdir(parents=True)
+        repo.mkdir()
+        subprocess.run(["git", "-C", str(repo), "init", "-q", "-b", "main"], check=True)
+
+        tool = Path(__file__).resolve().parent.parent / "bin" / (
+            "leveldb-writer.exe" if os.name == "nt" else "leveldb-writer"
+        )
+        if not tool.exists():
+            self.skipTest("leveldb-writer not built")
+
+        cli_path = Path(__file__).resolve().parent.parent / "bin" / "helium-sync"
+        env = os.environ.copy()
+        env["APPDATA"] = str(root / "appdata")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(cli_path),
+                "--profile",
+                str(profile),
+                "--repo",
+                str(repo),
+                "doctor",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("[ok] git", result.stdout)
+        self.assertIn("[ok] profile", result.stdout)
+        self.assertIn("[ok] repo git", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
