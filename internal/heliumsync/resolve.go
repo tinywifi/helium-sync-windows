@@ -52,6 +52,9 @@ func (a App) resolveTUI(target, theirs string) int {
 		fmt.Println("Run: helium-sync pull --dry-run   to see what would change")
 		return 1
 	}
+	if target == "bookmarks" {
+		return a.resolveBookmarksTUI(live, canonical, tgt)
+	}
 	items := []list.Item{
 		resolveItem{"local", tgt.Summary(live)},
 		resolveItem{"canonical", tgt.Summary(canonical)},
@@ -73,6 +76,33 @@ func (a App) resolveTUI(target, theirs string) int {
 		return 2
 	}
 	fmt.Printf("resolved: kept local %s\n", target)
+	fmt.Printf("backup: %s\n", rel(a.RepoRoot, backup))
+	return 0
+}
+
+func (a App) resolveBookmarksTUI(live, canonical any, tgt Target) int {
+	rows := bookmarkResolveRows(asMap(live), asMap(canonical))
+	if len(rows) == 0 {
+		fmt.Println("no divergences found -- live and canonical are identical")
+		return 0
+	}
+	model := newBookmarkResolveModel(rows)
+	final, err := tea.NewProgram(model).Run()
+	if err != nil {
+		return 7
+	}
+	resolved := final.(bookmarkResolveModel)
+	if resolved.canceled {
+		fmt.Println("resolve canceled")
+		return 1
+	}
+	merged := mergeBookmarksFromRows(asMap(live), asMap(canonical), resolved.rows)
+	backup := filepath.Join(a.LogsDir, "preSync."+nowStamp())
+	if err := tgt.Apply(a.Profile, merged, backup); err != nil {
+		fmt.Printf("failed to write merged %s: %v\n", tgt.Name(), err)
+		return 2
+	}
+	fmt.Printf("resolved: kept selected %s\n", tgt.Name())
 	fmt.Printf("backup: %s\n", rel(a.RepoRoot, backup))
 	return 0
 }

@@ -9,64 +9,75 @@ import (
 )
 
 func (a App) Status(target string) int {
-	fmt.Printf("Repo:    %s\nProfile: %s\nHost:    %s\nHelium running here: %s\n\n", a.RepoRoot, a.Profile, Hostname(), yesNo(HeliumRunning()))
-	fmt.Println("Recent commits:")
+	fmt.Println(uiBlock("status",
+		renderKV("repo", a.RepoRoot, "245"),
+		renderKV("profile", a.Profile, "245"),
+		renderKV("host", Hostname(), "245"),
+		renderKV("helium running", yesNo(HeliumRunning()), "245"),
+	))
+	fmt.Println()
+	fmt.Println(uiSection("Recent commits"))
 	out, _ := a.RunGit("log", "--oneline", "--decorate", "-5")
 	if strings.TrimSpace(out) == "" {
-		fmt.Println("  (none)")
+		fmt.Println("  " + uiDim.Render("(none)"))
 	} else {
 		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 			fmt.Println("  " + line)
 		}
 	}
-	fmt.Println("\nPer target:")
+	fmt.Println()
+	fmt.Println(uiSection("Per target"))
 	for _, t := range a.targetByName(target) {
 		live, err := t.Extract(a.Profile)
 		if err != nil {
-			fmt.Printf("  %-18s extract failed: %v\n", t.Name(), err)
+			fmt.Println("  " + uiStatus("fail", t.Name(), "extract failed: "+err.Error()))
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(a.StateDir, t.StateFilename()))
 		if err != nil {
-			fmt.Printf("  %-18s live=%s; canonical=(absent -- run `helium-sync init`)\n", t.Name(), t.Summary(live))
+			fmt.Printf("  %s\n", uiStatus("warn", t.Name(), "live="+t.Summary(live)+"; canonical=(absent -- run `helium-sync init`)"))
 			continue
 		}
 		canonical, err := t.Deserialize(string(raw))
 		if err != nil {
-			fmt.Printf("  %-18s canonical parse failed: %v\n", t.Name(), err)
+			fmt.Println("  " + uiStatus("fail", t.Name(), "canonical parse failed: "+err.Error()))
 			continue
 		}
 		if t.SemanticallyEqual(live, canonical) {
-			fmt.Printf("  %-18s [ok] %s  (in sync)\n", t.Name(), t.Summary(live))
+			fmt.Printf("  %s\n", uiStatus("ok", t.Name(), t.Summary(live)+" (in sync)"))
 		} else {
-			fmt.Printf("  %-18s live=%s | canonical=%s | differs (push to propagate)\n", t.Name(), t.Summary(live), t.Summary(canonical))
+			fmt.Printf("  %s\n", uiStatus("warn", t.Name(), fmt.Sprintf("live=%s | canonical=%s | differs (push to propagate)", t.Summary(live), t.Summary(canonical))))
 		}
 	}
 	return 0
 }
 
 func (a App) Diff(target string) int {
-	fmt.Printf("Repo:    %s\nProfile: %s\nHost:    %s\n\n", a.RepoRoot, a.Profile, Hostname())
+	fmt.Println(uiBlock("diff",
+		renderKV("repo", a.RepoRoot, "245"),
+		renderKV("profile", a.Profile, "245"),
+		renderKV("host", Hostname(), "245"),
+	))
 	for _, t := range a.targetByName(target) {
 		live, err := t.Extract(a.Profile)
 		if err != nil {
-			fmt.Printf("  %s: extract failed: %v\n", t.Name(), err)
+			fmt.Printf("  %s\n", uiStatus("fail", t.Name(), "extract failed: "+err.Error()))
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(a.StateDir, t.StateFilename()))
 		if err != nil {
-			fmt.Printf("  %s: no canonical state (run `helium-sync init` first)\n", t.Name())
+			fmt.Printf("  %s\n", uiStatus("warn", t.Name(), "no canonical state (run `helium-sync init` first)"))
 			continue
 		}
 		canonical, _ := t.Deserialize(string(raw))
 		if t.SemanticallyEqual(live, canonical) {
-			fmt.Printf("  %s: in sync - no changes\n\n", t.Name())
+			fmt.Printf("  %s\n\n", uiStatus("ok", t.Name(), "in sync - no changes"))
 			continue
 		}
 		if t.Name() == "bookmarks" {
 			PrintBookmarkDiff(asMap(live), asMap(canonical))
 		} else {
-			fmt.Printf("  %s: differs from canonical\n    (use `helium-sync status` for details)\n", t.Name())
+			fmt.Printf("  %s\n    %s\n", uiStatus("warn", t.Name(), "differs from canonical"), uiDim.Render("use `helium-sync status` for details"))
 		}
 		fmt.Println()
 	}
@@ -88,7 +99,7 @@ func PrintBookmarkDiff(live, canonical map[string]any) {
 		all = append(all, k)
 	}
 	sort.Strings(all)
-	fmt.Println("  bookmarks:")
+	fmt.Println("  " + uiTitle.Render("bookmarks"))
 	for _, key := range all {
 		liveName, canonName := liveURLs[key], canonURLs[key]
 		parts := strings.SplitN(key, "\x00", 2)
@@ -97,11 +108,11 @@ func PrintBookmarkDiff(live, canonical map[string]any) {
 			url = parts[1]
 		}
 		if canonName != "" && liveName == "" {
-			fmt.Printf("    - [%s] %s (%s)\n", path, canonName, url)
+			fmt.Printf("    %s [%s] %s (%s)\n", uiGood.Render("-"), path, canonName, url)
 		} else if liveName != "" && canonName == "" {
-			fmt.Printf("    + [%s] %s (%s)\n", path, liveName, url)
+			fmt.Printf("    %s [%s] %s (%s)\n", uiGood.Render("+"), path, liveName, url)
 		} else if liveName != canonName {
-			fmt.Printf("    ~ [%s] %s -> %s (%s)\n", path, canonName, liveName, url)
+			fmt.Printf("    %s [%s] %s -> %s (%s)\n", uiWarn.Render("~"), path, canonName, liveName, url)
 		}
 	}
 }

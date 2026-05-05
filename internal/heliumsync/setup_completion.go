@@ -13,12 +13,14 @@ import (
 func (a App) Setup(force, yes bool) int {
 	config := DefaultConfig()
 	if _, err := os.Stat(config); err == nil && !force {
-		fmt.Printf("Already configured: %s\n", config)
+		fmt.Println(uiBlock("setup",
+			uiStatus("warn", "setup", "already configured: "+config),
+		))
 		if repo := configRepo(config); repo != "" {
-			fmt.Printf("  data repo: %s\n", repo)
+			fmt.Println("  " + renderKV("data repo", repo, "245"))
 		}
 		fmt.Println()
-		fmt.Println("Pass --force to reconfigure (existing config will be overwritten).")
+		fmt.Println(uiDim.Render("Pass --force to reconfigure (existing config will be overwritten)."))
 		return 8
 	}
 	home, _ := os.UserHomeDir()
@@ -35,14 +37,14 @@ func (a App) Setup(force, yes bool) int {
 	}
 	if entries, err := os.ReadDir(repo); err == nil && len(entries) > 0 {
 		if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
-			fmt.Printf("  [error] %s exists and isn't empty / isn't a git repo. Pick a different path.\n", repo)
+			fmt.Println(uiStatus("fail", "setup", repo+" exists and isn't empty / isn't a git repo. Pick a different path."))
 			return 8
 		}
 	}
 	_ = os.MkdirAll(repo, 0755)
 	if _, err := os.Stat(filepath.Join(repo, ".git")); err != nil {
 		_ = exec.Command("git", "-C", repo, "init", "-q", "-b", "main").Run()
-		fmt.Println("  [ok] initialized git repo")
+		fmt.Println("  " + uiStatus("ok", "setup", "initialized git repo"))
 	}
 	isAdopt := false
 	if remote != "" {
@@ -51,44 +53,41 @@ func (a App) Setup(force, yes bool) int {
 		} else {
 			_ = exec.Command("git", "-C", repo, "remote", "add", "origin", remote).Run()
 		}
-		fmt.Printf("  [ok] origin -> %s\n", remote)
+		fmt.Println("  " + uiStatus("ok", "setup", "origin -> "+remote))
 		if out, err := exec.Command("git", "-C", repo, "ls-remote", "origin", "main").Output(); err == nil && strings.TrimSpace(string(out)) != "" {
 			isAdopt = true
-			fmt.Println("  [ok] remote has existing canonical state - this is an ADOPT situation")
+			fmt.Println("  " + uiStatus("ok", "setup", "remote has existing canonical state - this is an ADOPT situation"))
 			_ = exec.Command("git", "-C", repo, "fetch", "origin", "main", "--quiet").Run()
 			_ = exec.Command("git", "-C", repo, "checkout", "-q", "-B", "main", "origin/main").Run()
 		} else {
-			fmt.Println("  [ok] remote is empty - first-device flow")
+			fmt.Println("  " + uiStatus("ok", "setup", "remote is empty - first-device flow"))
 		}
 	}
 	_ = os.MkdirAll(filepath.Dir(config), 0755)
 	_ = os.WriteFile(config, []byte(fmt.Sprintf("repo = %q\n", filepath.ToSlash(repo))), 0644)
-	fmt.Printf("  [ok] %s\n", config)
+	fmt.Println("  " + uiStatus("ok", "setup", config))
 	next := New(repo, a.Profile)
 	if isAdopt {
-		fmt.Println("Next: ADOPT - this will REPLACE your local Helium state with the canonical")
-		fmt.Println("from the remote. Backups go to logs/prePull.<timestamp>/.")
+		fmt.Println(uiBlock("next", "ADOPT - this will REPLACE your local Helium state with the canonical", "from the remote. Backups go to logs/prePull.<timestamp>/."))
 		if HeliumRunning() {
-			fmt.Println("WARNING: Helium is running. Close it first, then run:")
-			fmt.Println("    helium-sync adopt")
+			fmt.Println(uiBlock("warning", "Helium is running. Close it first, then run:", "    helium-sync adopt"))
 			return 0
 		}
 		if !yes && !confirm("Continue?", false) {
-			fmt.Println("aborted. When you're ready, run: helium-sync adopt")
+			fmt.Println(uiDim.Render("aborted. When you're ready, run: helium-sync adopt"))
 			return 0
 		}
 		return next.Pull("", false, false)
 	}
-	fmt.Println("Next: extract your current Helium state and push to canonical.")
+	fmt.Println(uiBlock("next", "extract your current Helium state and push to canonical."))
 	if !yes && !confirm("Continue?", true) {
-		fmt.Println("aborted. When you're ready, run: helium-sync init")
+		fmt.Println(uiDim.Render("aborted. When you're ready, run: helium-sync init"))
 		return 0
 	}
 	rc := next.Push("", false, false)
 	if rc == 0 {
 		fmt.Println()
-		fmt.Println("Done. On other devices: install helium-sync, run `helium-sync setup` and")
-		fmt.Println("give it the remote URL pointing at this data repo.")
+		fmt.Println(uiBlock("done", "On other devices: install helium-sync, run `helium-sync setup` and", "give it the remote URL pointing at this data repo."))
 	}
 	return rc
 }

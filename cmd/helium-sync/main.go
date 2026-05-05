@@ -126,5 +126,5 @@ func run(args []string) int {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: helium-sync [--profile PATH] [--repo PATH] <setup|push|pull|status|diff|doctor|version|init|adopt|log|gc|export|import|restore|resolve|completion>")
+	fmt.Fprintln(os.Stderr, heliumsync.UsageScreen())
 }

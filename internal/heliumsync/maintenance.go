@@ -79,10 +79,9 @@ func (a App) Doctor() int {
 		} else if level == "warn" {
 			warnings++
 		}
-		fmt.Printf("[%s] %-20s %s\n", level, name, detail)
+		fmt.Println(uiStatus(level, name, detail))
 	}
-	fmt.Println("helium-sync doctor")
-	fmt.Println()
+	fmt.Println(uiBlock("doctor", "system and repository checks"))
 	if out, err := exec.Command("git", "--version").Output(); err == nil {
 		report("ok", "git", strings.TrimSpace(string(out)))
 	} else {
@@ -142,18 +141,15 @@ func (a App) Doctor() int {
 	}
 	fmt.Println()
 	if failures > 0 {
-		fmt.Printf("doctor found %d failure(s) and %d warning(s)\n", failures, warnings)
+		fmt.Println(uiStatus("fail", "doctor", fmt.Sprintf("found %d failure(s) and %d warning(s)", failures, warnings)))
 		return 1
 	}
-	fmt.Printf("doctor found 0 failures and %d warning(s)\n", warnings)
+	fmt.Println(uiStatus("ok", "doctor", fmt.Sprintf("found 0 failures and %d warning(s)", warnings)))
 	return 0
 }
 
 func (a App) Version() int {
-	fmt.Printf("helium-sync %s\n", a.AppVersion())
-	fmt.Printf("git revision: %s\n", a.GitRevision())
-	fmt.Printf("go: %s\n", runtimeSummary())
-	fmt.Println("leveldb: embedded goleveldb")
+	fmt.Println(VersionScreen(a.AppVersion(), a.GitRevision(), runtimeSummary()))
 	return 0
 }
 
@@ -163,10 +159,10 @@ func (a App) Log(n int) int {
 	}
 	out, _ := a.RunGit("log", "--max-count="+strconv.Itoa(n), "--pretty=format:%h  %ad  %s", "--date=format:%Y-%m-%d %H:%M")
 	if strings.TrimSpace(out) == "" {
-		fmt.Println("(no commits)")
+		fmt.Println(uiDim.Render("(no commits)"))
 		return 0
 	}
-	fmt.Println(out)
+	fmt.Println(uiBlock("log", strings.TrimSpace(out)))
 	return 0
 }
 
@@ -193,19 +189,19 @@ func (a App) GC(keepDays int, dryRun bool) int {
 		}
 	}
 	if len(old) == 0 {
-		fmt.Printf("no backups older than %d day(s) -- nothing to prune\n", keepDays)
+		fmt.Println(uiStatus("ok", "gc", fmt.Sprintf("no backups older than %d day(s) -- nothing to prune", keepDays)))
 		return 0
 	}
 	for _, path := range old {
-		fmt.Println("  " + filepath.Base(path))
+		fmt.Printf("  %s\n", uiStatus("warn", "gc", filepath.Base(path)))
 		if !dryRun {
 			_ = os.RemoveAll(path)
 		}
 	}
 	if dryRun {
-		fmt.Println("(dry run -- pass without --dry-run to actually delete)")
+		fmt.Println(uiDim.Render("(dry run -- pass without --dry-run to actually delete)"))
 	} else {
-		fmt.Printf("deleted %d backup directories\n", len(old))
+		fmt.Println(uiStatus("ok", "gc", fmt.Sprintf("deleted %d backup directories", len(old))))
 	}
 	return 0
 }
@@ -214,8 +210,10 @@ func (a App) Init(target string, force, strict, dryRun bool) int {
 	if !force {
 		for _, t := range a.Targets {
 			if _, err := os.Stat(filepath.Join(a.StateDir, t.StateFilename())); err == nil {
-				fmt.Printf("ERROR: canonical state already exists in %s/\n", rel(a.RepoRoot, a.StateDir))
-				fmt.Println("If you really want to overwrite it, pass --force.")
+				fmt.Println(uiBlock("init blocked",
+					uiBad.Render("canonical state already exists in "+rel(a.RepoRoot, a.StateDir)+"/"),
+					"If you really want to overwrite it, pass --force.",
+				))
 				return 6
 			}
 		}
@@ -230,7 +228,7 @@ func (a App) Adopt(yes, allowRunning bool) int {
 			huh.NewConfirm().Title("Replace local Helium state with canonical repo state?").Value(&ok),
 		))
 		if err := form.Run(); err != nil || !ok {
-			fmt.Println("aborted")
+			fmt.Println(uiDim.Render("aborted"))
 			return 7
 		}
 	}

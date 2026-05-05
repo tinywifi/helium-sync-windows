@@ -45,7 +45,7 @@ func TestStatusAndDiffCommands(t *testing.T) {
 		t.Fatalf("unexpected status rc=%d output=%s", rc, out)
 	}
 	rc, out = captureOutput(t, func() int { return app.Diff("") })
-	if rc != 0 || !strings.Contains(out, "+ [bookmark_bar] Changed") || !strings.Contains(out, "- [bookmark_bar] Live") {
+	if rc != 0 || !strings.Contains(out, "Changed") || !strings.Contains(out, "Live") || !strings.Contains(out, "bookmark_bar") {
 		t.Fatalf("unexpected diff rc=%d output=%s", rc, out)
 	}
 }
@@ -174,7 +174,7 @@ func TestSetupAlreadyConfiguredShowsRepo(t *testing.T) {
 	}
 	app := New(filepath.Join(tmp, "repo"), filepath.Join(tmp, "profile"))
 	rc, out := captureOutput(t, func() int { return app.Setup(false, true) })
-	if rc != 8 || !strings.Contains(out, "data repo: C:/data/helium") {
+	if rc != 8 || !strings.Contains(out, "C:/data/helium") {
 		t.Fatalf("unexpected setup configured rc=%d out=%s", rc, out)
 	}
 }
@@ -200,6 +200,53 @@ func TestResolveNonTTYAndTreeNodes(t *testing.T) {
 	nodes := resolveTreeNodes("bookmarks", live, canonical)
 	if len(nodes) != 1 || len(nodes[0].Children) != 2 {
 		t.Fatalf("expected tree root with local/canonical children: %#v", nodes)
+	}
+}
+
+func TestBookmarkResolveRowsAndMerge(t *testing.T) {
+	live := bookmarkTree([]any{
+		urlNode("Live", "https://live"),
+		urlNode("Shared Live", "https://shared"),
+	})
+	canonical := bookmarkTree([]any{
+		urlNode("Canonical", "https://canonical"),
+		urlNode("Shared Canon", "https://shared"),
+	})
+	rows := bookmarkResolveRows(live, canonical)
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d", len(rows))
+	}
+	var canonRow bookmarkResolveRow
+	for _, row := range rows {
+		if row.URL == "https://canonical" {
+			canonRow = row
+		}
+	}
+	if canonRow.Selected != "canonical" {
+		t.Fatalf("canonical-only row should default to canonical: %#v", canonRow)
+	}
+	merged := mergeBookmarksFromRows(live, canonical, []bookmarkResolveRow{
+		{Key: "bookmark_bar\x00https://live", Path: "bookmark_bar", URL: "https://live", LocalPresent: true, Selected: "local"},
+		{Key: "bookmark_bar\x00https://canonical", Path: "bookmark_bar", URL: "https://canonical", CanonicalPresent: true, Selected: "canonical"},
+		{Key: "bookmark_bar\x00https://shared", Path: "bookmark_bar", URL: "https://shared", LocalPresent: true, CanonicalPresent: true, Selected: "canonical"},
+	})
+	urls := bookmarkNodeByURL(merged)
+	if _, ok := urls["https://canonical"]; !ok {
+		t.Fatalf("expected canonical-only row to be inserted")
+	}
+	if str(urls["https://shared"]["name"]) != "Shared Canon" {
+		t.Fatalf("expected canonical shared row to replace live entry")
+	}
+}
+
+func TestUsageAndVersionScreens(t *testing.T) {
+	usage := UsageScreen()
+	if !strings.Contains(usage, "resolve") || !strings.Contains(usage, "completion") || !strings.Contains(usage, "Windows fork") {
+		t.Fatalf("unexpected usage screen: %s", usage)
+	}
+	version := VersionScreen("1.0.0", "abc123", "windows/amd64 go1.26.2")
+	if !strings.Contains(version, "helium-sync") || !strings.Contains(version, "abc123") || !strings.Contains(version, "embedded goleveldb") {
+		t.Fatalf("unexpected version screen: %s", version)
 	}
 }
 
