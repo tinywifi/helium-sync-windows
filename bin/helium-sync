@@ -9,6 +9,7 @@ Usage:
   helium-sync pull         origin -> repo -> this device's live profile
                            (close Helium first)
   helium-sync doctor       Check local install and sync prerequisites
+  helium-sync version      Print version and runtime details
   helium-sync init         First-time: declare this device the source of truth
   helium-sync adopt        First-time on a new device: receive canonical state
 
@@ -152,6 +153,25 @@ def _leveldb_writer_path() -> Path:
 def _is_scoop_install() -> bool:
     parts = [part.lower() for part in _repo.parts]
     return "scoop" in parts and "apps" in parts and "helium-sync" in parts
+
+
+def _app_version() -> str:
+    version_file = _repo / "VERSION"
+    if version_file.exists():
+        text = version_file.read_text().strip()
+        if text:
+            return text
+    return "unknown"
+
+
+def _git_revision() -> str:
+    if not (_repo / ".git").exists() or not _git_available():
+        return "not available"
+    desc = subprocess.run(
+        ["git", "-C", str(_repo), "describe", "--tags", "--dirty", "--always"],
+        capture_output=True, text=True, check=False,
+    )
+    return (desc.stdout or "not available").strip()
 
 
 def log(msg: str) -> None:
@@ -418,6 +438,15 @@ def cmd_doctor(args) -> int:
         print(f"doctor found {failures} failure(s) and {warnings} warning(s)")
         return 1
     print(f"doctor found 0 failures and {warnings} warning(s)")
+    return 0
+
+
+def cmd_version(args) -> int:
+    tool = _leveldb_writer_path()
+    print(f"helium-sync {_app_version()}")
+    print(f"git revision: {_git_revision()}")
+    print(f"python: {sys.version.split()[0]} ({sys.executable})")
+    print(f"leveldb-writer: {'found' if tool.exists() else 'missing'} ({tool})")
     return 0
 
 
@@ -710,6 +739,8 @@ def main() -> int:
 
     sub.add_parser("doctor", help="check local install and sync prerequisites")
 
+    sub.add_parser("version", help="print version and runtime details")
+
     sub.add_parser("push", help="snapshot -> repo -> origin (close Helium first)")
 
     p_pull = sub.add_parser("pull", help="origin -> repo -> live profile")
@@ -747,6 +778,7 @@ def main() -> int:
         "setup":  cmd_setup,
         "status": cmd_status,
         "doctor": cmd_doctor,
+        "version": cmd_version,
         "push":   cmd_push,
         "pull":   cmd_pull,
         "init":   cmd_init,
