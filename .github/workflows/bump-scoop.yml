@@ -51,7 +51,7 @@ jobs:
           echo "arm_sha: $arm_sha"
 
       - name: checkout scoop-bucket
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: tinywifi/scoop-bucket
           token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
