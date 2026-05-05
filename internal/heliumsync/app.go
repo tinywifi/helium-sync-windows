@@ -1,10 +1,8 @@
 package heliumsync
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	clog "charm.land/log/v2"
 )
@@ -47,21 +45,7 @@ func (a App) targetByName(name string) []Target {
 }
 
 func (a App) logf(format string, args ...any) {
-	line := fmt.Sprintf("%s %s", nowISO(), fmt.Sprintf(format, args...))
-	fmt.Println(renderLogLine(line))
-	_ = os.MkdirAll(a.LogsDir, 0755)
-	f, err := os.OpenFile(filepath.Join(a.LogsDir, "sync.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err == nil {
-		defer f.Close()
-		_, _ = f.WriteString(line + "\n")
-	}
 	clog.Infof(format, args...)
 }
 
-func renderLogLine(line string) string {
-	parts := strings.SplitN(line, " ", 2)
-	if len(parts) != 2 {
-		return uiDim.Render(line)
-	}
-	return fmt.Sprintf("%s %s", uiDim.Render(parts[0]), parts[1])
-}
+
