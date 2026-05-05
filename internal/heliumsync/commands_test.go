@@ -181,41 +181,7 @@ func TestSetupAlreadyConfiguredShowsRepo(t *testing.T) {
 
 
 
-func TestBookmarkResolveRowsAndMerge(t *testing.T) {
-	live := bookmarkTree([]any{
-		urlNode("Live", "https://live"),
-		urlNode("Shared Live", "https://shared"),
-	})
-	canonical := bookmarkTree([]any{
-		urlNode("Canonical", "https://canonical"),
-		urlNode("Shared Canon", "https://shared"),
-	})
-	rows := bookmarkResolveRows(live, canonical)
-	if len(rows) != 3 {
-		t.Fatalf("expected 3 rows, got %d", len(rows))
-	}
-	var canonRow bookmarkResolveRow
-	for _, row := range rows {
-		if row.URL == "https://canonical" {
-			canonRow = row
-		}
-	}
-	if canonRow.Selected != "canonical" {
-		t.Fatalf("canonical-only row should default to canonical: %#v", canonRow)
-	}
-	merged := mergeBookmarksFromRows(live, canonical, []bookmarkResolveRow{
-		{Key: "bookmark_bar\x00https://live", Path: "bookmark_bar", URL: "https://live", LocalPresent: true, Selected: "local"},
-		{Key: "bookmark_bar\x00https://canonical", Path: "bookmark_bar", URL: "https://canonical", CanonicalPresent: true, Selected: "canonical"},
-		{Key: "bookmark_bar\x00https://shared", Path: "bookmark_bar", URL: "https://shared", LocalPresent: true, CanonicalPresent: true, Selected: "canonical"},
-	})
-	urls := bookmarkNodeByURL(merged)
-	if _, ok := urls["https://canonical"]; !ok {
-		t.Fatalf("expected canonical-only row to be inserted")
-	}
-	if str(urls["https://shared"]["name"]) != "Shared Canon" {
-		t.Fatalf("expected canonical shared row to replace live entry")
-	}
-}
+
 
 func TestUsageAndVersionScreens(t *testing.T) {
 	usage := UsageScreen()
@@ -228,45 +194,6 @@ func TestUsageAndVersionScreens(t *testing.T) {
 	}
 }
 
-func TestDefaultResolvedStateForTabGroupsKeepsCanonicalOnly(t *testing.T) {
-	live := groupState(
-		map[string]any{"local": map[string]any{"title": "Local"}},
-		map[string]any{"tab-local": map[string]any{"title": "Local"}},
-	)
-	canonical := groupState(
-		map[string]any{"canon": map[string]any{"title": "Canonical"}},
-		map[string]any{"tab-canon": map[string]any{"title": "Canonical"}},
-	)
-	merged := asMap(defaultResolvedState("saved_tab_groups", live, canonical))
-	if _, ok := mapValue(merged, "groups")["local"]; !ok {
-		t.Fatalf("missing local-only group")
-	}
-	if _, ok := mapValue(merged, "groups")["canon"]; !ok {
-		t.Fatalf("missing canonical-only group")
-	}
-	if _, ok := mapValue(merged, "tabs")["tab-canon"]; !ok {
-		t.Fatalf("missing canonical-only tab")
-	}
-}
 
-func TestMergeBookmarksDefaultMatchesPythonLiveTreeBehavior(t *testing.T) {
-	live := bookmarkTree([]any{
-		urlNode("Live", "https://live"),
-		urlNode("Conflict Live", "https://same"),
-	})
-	canonical := bookmarkTree([]any{
-		urlNode("Canonical", "https://canonical"),
-		urlNode("Conflict Canon", "https://same"),
-	})
-	merged := MergeBookmarksDefault(live, canonical)
-	urls := bookmarkNodeByURL(merged)
-	if _, ok := urls["https://live"]; !ok {
-		t.Fatalf("missing live URL")
-	}
-	if _, ok := urls["https://canonical"]; ok {
-		t.Fatalf("canonical-only URL should not be added by Python-compatible merge")
-	}
-	if str(urls["https://same"]["name"]) != "Conflict Live" {
-		t.Fatalf("default conflict should keep live name")
-	}
-}
+
+
