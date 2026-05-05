@@ -7,11 +7,15 @@ guard) doesn't fire. We import only the symbols we need.
 
 import importlib.machinery
 import importlib.util
+import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
+from unittest import mock
 
 
 def _import_cli():
@@ -124,6 +128,111 @@ class TestAsk(unittest.TestCase):
         # the default without prompting.
         self.assertEqual(cli._ask("prompt: ", default="hello"), "hello")
         self.assertEqual(cli._ask("prompt: ", default=""), "")
+
+
+class TestHeliumRunning(unittest.TestCase):
+    def setUp(self):
+        self.cli = _import_cli()
+
+    def test_detects_helium_running(self):
+        result = SimpleNamespace(stdout="helium.exe                  1234 Console")
+        with mock.patch.object(self.cli.subprocess, "run", return_value=result):
+            self.assertTrue(self.cli.helium_running())
+
+    def test_detects_no_matching_process(self):
+        result = SimpleNamespace(stdout="INFO: No tasks are running which match the specified criteria.")
+        with mock.patch.object(self.cli.subprocess, "run", return_value=result):
+            self.assertFalse(self.cli.helium_running())
+
+    def test_tasklist_failure_is_not_running(self):
+        result = SimpleNamespace(stdout="")
+        with mock.patch.object(self.cli.subprocess, "run", return_value=result):
+            self.assertFalse(self.cli.helium_running())
+
+
+class FakeTarget:
+    name = "fake_bookmarks"
+    state_filename = "fake_bookmarks.json"
+
+    def extract(self, profile_dir: Path) -> dict:
+        return json.loads((profile_dir / "Bookmarks").read_text())
+
+    def apply(self, profile_dir: Path, data: dict, backup_dir: Path) -> None:
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        live = profile_dir / "Bookmarks"
+        if live.exists():
+            (backup_dir / "Bookmarks").write_text(live.read_text())
+        live.write_text(json.dumps(data, sort_keys=True))
+
+    def serialize(self, data: dict) -> str:
+        return json.dumps(data, sort_keys=True, indent=2)
+
+    def deserialize(self, text: str) -> dict:
+        return json.loads(text)
+
+    def semantically_equal(self, live: dict, canonical: dict) -> bool:
+        return live == canonical
+
+
+class TestTempRepoIntegration(unittest.TestCase):
+    def setUp(self):
+        self.cli = _import_cli()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def _git(self, repo: Path, *args: str) -> None:
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True)
+
+    def _init_repo(self, repo: Path) -> None:
+        repo.mkdir(parents=True)
+        self._git(repo, "init", "-q", "-b", "main")
+        self._git(repo, "config", "user.name", "helium-sync-test")
+        self._git(repo, "config", "user.email", "helium-sync-test@example.invalid")
+
+    def test_push_and_pull_with_local_git_remote(self):
+        origin = self.root / "origin.git"
+        subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True, text=True)
+        subprocess.run(["git", "-C", str(origin), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
+
+        source_repo = self.root / "source-repo"
+        self._init_repo(source_repo)
+        self._git(source_repo, "remote", "add", "origin", str(origin))
+
+        source_profile = self.root / "source-profile"
+        source_profile.mkdir()
+        (source_profile / "Bookmarks").write_text(json.dumps({"roots": {"bookmark_bar": {"children": []}}}))
+
+        old_targets = self.cli.ALL_TARGETS
+        try:
+            self.cli.ALL_TARGETS = [FakeTarget()]
+            self.cli.REPO_ROOT = source_repo
+            self.cli.STATE_DIR = source_repo / "state"
+            self.cli.LOGS_DIR = source_repo / "logs"
+            push_rc = self.cli.cmd_push(SimpleNamespace(profile=source_profile))
+            self.assertEqual(push_rc, 0)
+
+            dest_repo = self.root / "dest-repo"
+            subprocess.run(["git", "clone", "-q", "-b", "main", str(origin), str(dest_repo)], check=True)
+            self._git(dest_repo, "config", "user.name", "helium-sync-test")
+            self._git(dest_repo, "config", "user.email", "helium-sync-test@example.invalid")
+
+            dest_profile = self.root / "dest-profile"
+            dest_profile.mkdir()
+            (dest_profile / "Bookmarks").write_text(json.dumps({"stale": True}))
+
+            self.cli.REPO_ROOT = dest_repo
+            self.cli.STATE_DIR = dest_repo / "state"
+            self.cli.LOGS_DIR = dest_repo / "logs"
+            pull_rc = self.cli.cmd_pull(SimpleNamespace(profile=dest_profile, allow_helium_running=True))
+            self.assertEqual(pull_rc, 0)
+
+            applied = json.loads((dest_profile / "Bookmarks").read_text())
+            self.assertEqual(applied, {"roots": {"bookmark_bar": {"children": []}}})
+            self.assertTrue(any((dest_repo / "logs").glob("prePull.*/Bookmarks")))
+        finally:
+            self.cli.ALL_TARGETS = old_targets
 
 
 if __name__ == "__main__":

@@ -38,5 +38,93 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o ..\..\leveldb-writer.exe .
           ..\..\leveldb-writer.exe read -h
 
+      - name: run Go tests
+        run: |
+          cd bin\_go\leveldb_writer
+          go test ./...
+
+      - name: smoke Windows launcher
+        run: bin\helium-sync.bat --help
+
+      - name: validate Scoop manifest
+        shell: pwsh
+        run: |
+          $path = "scoop\helium-sync.json"
+          $raw = Get-Content $path -Raw
+          $manifest = $raw | ConvertFrom-Json
+          if (-not $manifest.version) {
+            throw "Scoop manifest version is missing"
+          }
+          if (-not $manifest.architecture."64bit".url) {
+            throw "Scoop manifest architecture.64bit.url is missing"
+          }
+          $binJson = $manifest.bin | ConvertTo-Json -Compress
+          if (-not $binJson.Contains('bin\\helium-sync.bat')) {
+            throw "Scoop manifest bin must include bin\helium-sync.bat"
+          }
+          if ($raw -match 'PLACEHOLDER|sha256:PLACEHOLDER') {
+            throw "Scoop manifest contains placeholder SHA values"
+          }
+
       - name: run tests
         run: .venv\Scripts\python -m unittest discover tests/ -v
+
+  release-dry-build:
+    name: release dry build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: bin/_go/leveldb_writer/go.sum
+
+      - name: build release artifacts without publishing
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Set-Location bin\_go\leveldb_writer
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -trimpath -ldflags="-s -w" `
+            -o ..\..\..\dist\leveldb-writer-windows-amd64.exe .
+          $env:GOARCH = "arm64"
+          go build -trimpath -ldflags="-s -w" `
+            -o ..\..\..\dist\leveldb-writer-windows-arm64.exe .
+          Set-Location ..\..\..
+
+          $tag = "v0.0.0-ci"
+          foreach ($arch in @("amd64", "arm64")) {
+            $stage = "staging\$arch"
+            New-Item -ItemType Directory -Force "$stage\bin\targets\_proto" | Out-Null
+
+            Copy-Item bin\helium-sync "$stage\bin\helium-sync"
+            Copy-Item bin\helium-sync.bat "$stage\bin\helium-sync.bat"
+            Copy-Item bin\targets\__init__.py "$stage\bin\targets\__init__.py"
+            Copy-Item bin\targets\bookmarks.py "$stage\bin\targets\bookmarks.py"
+            Copy-Item bin\targets\saved_tab_groups.py "$stage\bin\targets\saved_tab_groups.py"
+            Copy-Item bin\targets\_proto\local_entity_wrapper_pb2.py `
+              "$stage\bin\targets\_proto\local_entity_wrapper_pb2.py"
+            Copy-Item bin\targets\_proto\saved_tab_group_specifics_pb2.py `
+              "$stage\bin\targets\_proto\saved_tab_group_specifics_pb2.py"
+            Copy-Item bin\targets\_proto\tab_group_attribution_metadata_pb2.py `
+              "$stage\bin\targets\_proto\tab_group_attribution_metadata_pb2.py"
+            Copy-Item requirements.txt "$stage\requirements.txt"
+            Copy-Item "dist\leveldb-writer-windows-$arch.exe" "$stage\bin\leveldb-writer.exe"
+
+            Compress-Archive -Path "$stage\*" `
+              -DestinationPath "dist\helium-sync-windows-$tag-$arch.zip"
+          }
+
+          foreach ($path in @(
+            "dist\leveldb-writer-windows-amd64.exe",
+            "dist\leveldb-writer-windows-arm64.exe",
+            "dist\helium-sync-windows-$tag-amd64.zip",
+            "dist\helium-sync-windows-$tag-arm64.zip"
+          )) {
+            if (-not (Test-Path $path)) {
+              throw "Missing dry-build artifact: $path"
+            }
+          }
