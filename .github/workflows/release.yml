@@ -130,7 +130,7 @@ jobs:
           $notes | Set-Content "dist\release-notes.md" -Encoding utf8
 
       - name: publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/helium-sync-windows-*-amd64.zip
