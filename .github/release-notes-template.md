@@ -2,7 +2,15 @@
 
 ## Should you update?
 
-Update if you installed with Scoop, use saved tab group sync, or want the latest Windows packaging fixes.
+Yes. This release adds support commands for debugging installs and fixes Scoop packaging behavior.
+
+## Highlights
+
+- Added `helium-sync doctor` to check git, Python venv, `leveldb-writer.exe`, profile path, repo config, remote setup, and Scoop install detection.
+- Added `helium-sync version` to print the app version, git revision, Python runtime, and `leveldb-writer.exe` status.
+- Fixed Scoop post-install venv creation to use the versioned install directory instead of the `current` symlink path.
+- Added Scoop uninstall guidance so config and sync data are intentionally left in place.
+- Added a doctor CLI fixture, Scoop autoupdate validation, curated release notes, and release dry-build coverage in CI.
 
 ## Install or update
 
