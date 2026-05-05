@@ -23,6 +23,68 @@ A target is responsible for:
 Targets carry two attributes:
   - name           : short identifier, e.g. "bookmarks"
   - state_filename : filename within state/, e.g. "bookmarks.json"
+
+## CLI Commands (bin/helium-sync)
+All commands auto-relaunch under .venv/Scripts/python.exe if not already.
+
+### Core
+  setup          — interactive first-time configuration (writes %APPDATA%/helium-sync/config.toml)
+  push           — snapshot live → git commit → git push (--target, --strict, --dry-run)
+  pull           — git pull --rebase → write to live profile (--target, --dry-run, --allow-helium-running)
+
+### Inspect & debug
+  status         — diff live vs canonical state (--target)
+  diff           — human-readable bookmark diff (live ≠ canonical) (--target)
+  doctor         — check git, Python venv, profile, repo, remote, Scoop
+  version        — print version, git revision, Python runtime
+  log            — show recent sync commits (-n count)
+
+### Portable backup
+  export         — export canonical state to JSON (--output, --target)
+  import         — import JSON into canonical state (--target, --allow-helium-running)
+
+### Safety & recovery
+  restore        — restore profile from latest logs/prePull or preImport or preSync backup
+  resolve        — interactive TUI to merge divergent bookmark states (--theirs)
+                   ↑↓ navigate, Space toggle, Enter apply, Q cancel.
+                   Handles local-only, remote-only, and name conflicts.
+
+### Shell completion
+  completion     — generate PowerShell or cmd.exe completion scripts (--shell powershell|cmd)
+
+### Maintenance
+  init           — lower-level: bootstrap on source-of-truth device (--force)
+  adopt          — lower-level: bootstrap on new device receiving canonical (--yes)
+  gc             — prune logs/ backups older than 30 days (--keep-days, --dry-run)
+
+## Flags
+  --target <name>         limit operation to one target (e.g. bookmarks)
+  --strict                fail push on validation errors (empty URLs, invalid schemes)
+  --dry-run               show what would change without committing/pushing/writing
+  --allow-helium-running  bypass the running-browser guard (DANGEROUS)
+  --profile <path>        override auto-detected Helium profile path
+  --repo <path>           override auto-detected sync repo path
+
+## Tests
+  Pure-Python tests in tests/ run on every CI push and PR.
+  Real-Helium tests (TestRealHelium, TestApply) auto-skip without a Helium profile.
+  Override with HELIUM_PROFILE=... for non-standard installs.
+  Run: python -m unittest discover tests/
+  New features must have corresponding test cases in tests/test_<feature>.py.
+
+## Architecture
+  bin/helium-sync          — CLI entry point (auto-relaunches under venv Python)
+  bin/targets/             — sync target modules (bookmarks, saved_tab_groups)
+  bin/_go/leveldb_writer/  — Go binary source for LevelDB read/write
+  proto/                   — vendored Chromium proto schemas
+  tests/                   — pure-Python unit tests
+  .github/ISSUE_TEMPLATE/  — interactive YAML issue forms
+  .github/workflows/       — CI (test.yml) + release (release.yml on tag push)
+
+## Platform
+  Windows only. Profile: %LOCALAPPDATA%/imput/Helium/User Data
+  Config: %APPDATA%/helium-sync/config.toml
+  Data repo uses real git. Code repo .gitignore excludes state/ and logs/.
 """
 
 from __future__ import annotations

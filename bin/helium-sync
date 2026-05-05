@@ -1294,31 +1294,87 @@ def cmd_resolve(args) -> int:
         })
 
     cursor = 0
-    print("Resolve divergences (↑↓ navigate, Space toggle, Enter resolve, Q quit)")
-    print("-" * 70)
+    width = max(72, max((len(item['name']) + 20 for item in items), default=72))
 
-    def render():
+    # Windows console colors via ctypes (no deps)
+    import ctypes
+    h = ctypes.windll.kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+    RESET = '\033[0m' if os.environ.get('WT_SESSION') or os.environ.get('TERM') else ''
+    GREEN = '\033[32m' if os.environ.get('WT_SESSION') or os.environ.get('TERM') else ''
+    CYAN = '\033[36m' if os.environ.get('WT_SESSION') or os.environ.get('TERM') else ''
+    YELLOW = '\033[33m' if os.environ.get('WT_SESSION') or os.environ.get('TERM') else ''
+    BOLD = '\033[1m' if os.environ.get('WT_SESSION') or os.environ.get('TERM') else ''
+    DIM = '\033[2m' if os.environ.get('WT_SESSION') or os.environ.get('TERM') else ''
+
+    def _color(text, color_code):
+        return f'{color_code}{text}{RESET}' if RESET else text
+
+    def _truncate_url(url, max_len=60):
+        if len(url) <= max_len:
+            return url
+        return '...' + url[-(max_len - 3):]
+
+    def _render():
         os.system("cls" if os.name == "nt" else "clear")
-        print("Resolve divergences (↑↓ navigate, Space toggle, Enter resolve, Q quit)")
-        print("-" * 70)
-        for i, item in enumerate(items):
-            arrow = ">> " if i == cursor else "   "
-            sel = "[*]" if item["keep"] else "[ ]"
-            src = item["source"]
-            if src == "conflict":
-                local_name = item.get("name", "?")
-                theirs_name = item.get("theirs_name", "?")
-                theirs_sel = "[*]" if item.get("keep_theirs", False) else "[ ]"
-                print(f"{arrow}{sel} LOCAL:  {local_name}")
-                print(f"      {theirs_sel} THEIRS: {theirs_name}")
-                print(f"      {item['url'][:65]}")
-            else:
-                print(f"{arrow}{sel} [{src:^10s}] {item['name']}")
-                print(f"      {item['url'][:65]}")
-        print("-" * 70)
-        print(f"{len(items)} items | Enter=resolve | Q=quit")
+        print(f'{BOLD}Resolve bookmark divergences{RESET}')
+        print(f'{DIM}↑↓ navigate  Space toggle  Enter apply  Q quit{RESET}')
+        print('─' * width)
 
-    render()
+        selected = 0
+        total = 0
+        for i, item in enumerate(items):
+            total += 1
+            if item["conflict"]:
+                sel = "[*]" if item.get("keep_theirs", False) else "[ ]"
+                arrow = f"{BOLD}>>{RESET}" if i == cursor else "  "
+                local_sel = "[ ]" if item["keep"] else "[ ]"
+                if item["keep"]:
+                    local_sel = f"{GREEN}[x]{RESET}"
+                else:
+                    local_sel = f"{DIM}[ ]{RESET}"
+
+                theirs_sel = f"{CYAN}[x]{RESET}" if item.get("keep_theirs", False) else f"{DIM}[ ]{RESET}"
+                url_display = _truncate_url(item['url'])
+
+                if i == cursor:
+                    print(f'{BOLD}▼{RESET} {local_sel}  {GREEN}local{RESET}:   {item["name"]}')
+                    print(f'  {theirs_sel}  {CYAN}remote{RESET}:  {item.get("theirs_name", "?")}')
+                    print(f'  {DIM}{url_display}{RESET}')
+                else:
+                    print(f'  {local_sel}  {GREEN}local{RESET}:   {item["name"]}')
+                    print(f'  {theirs_sel}  {CYAN}remote{RESET}:  {item.get("theirs_name", "?")}')
+                    print(f'  {DIM}{url_display}{RESET}')
+
+                if i < len(items) - 1:
+                    print()
+            else:
+                arrow = f"{BOLD}>>{RESET}" if i == cursor else "  "
+                if item["source"] == "local":
+                    tag = f'{GREEN}local{RESET}'
+                    sel = f'{GREEN}[x]{RESET}' if item["keep"] else f'{DIM}[ ]{RESET}'
+                    if item["keep"]:
+                        selected += 1
+                else:
+                    tag = f'{CYAN}remote{RESET}'
+                    sel = f'{CYAN}[x]{RESET}' if item["keep"] else f'{DIM}[ ]{RESET}'
+                    if item["keep"]:
+                        selected += 1
+
+                url_display = _truncate_url(item['url'])
+                if i == cursor:
+                    print(f'{BOLD}▼ {sel}  {tag}  {item["name"]}{RESET}')
+                    print(f'  {DIM}{url_display}{RESET}')
+                else:
+                    print(f'  {sel}  {tag}  {item["name"]}')
+                    print(f'  {DIM}{url_display}{RESET}')
+
+                if i < len(items) - 1:
+                    print()
+
+        print('─' * width)
+        print(f'{selected}/{total} bookmarks selected  {BOLD}Enter{RESET} to apply  {BOLD}Q{RESET} to cancel')
+
+    _render()
     while True:
         try:
             key = msvcrt.getch()
@@ -1341,9 +1397,9 @@ def cmd_resolve(args) -> int:
         elif key in (b"\r", b"\n"):
             break
         elif key.lower() == b"q":
-            print("\nquit without changes")
+            print("\nresolve cancelled — no changes applied")
             return 0
-        render()
+        _render()
 
     # Apply resolution: rebuild bookmark tree
     new_roots = {}
