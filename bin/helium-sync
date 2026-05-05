@@ -833,12 +833,17 @@ def cmd_pull(args) -> int:
         print("(Or, for testing: --allow-helium-running)")
         return 4
 
-    log("git pull --rebase...")
-    try:
-        run_git(["pull", "--rebase", "--quiet"])
-    except subprocess.CalledProcessError as e:
-        log(f"git pull failed: {(e.stderr or '').strip()}")
-        return 1
+    has_upstream = _has_upstream()
+
+    if has_upstream:
+        log("git pull --rebase...")
+        try:
+            run_git(["pull", "--rebase", "--quiet"])
+        except subprocess.CalledProcessError as e:
+            log(f"git pull failed: {(e.stderr or '').strip()}")
+            return 1
+    else:
+        log("(no upstream configured -- nothing to pull from remote)")
 
     backup_root = LOGS_DIR / f"prePull.{now_stamp()}"
     backup_root.mkdir(parents=True, exist_ok=True)
@@ -1597,6 +1602,8 @@ def main() -> int:
     p_init = sub.add_parser("init", help="first-time: this device is the truth")
     p_init.add_argument("--force", action="store_true",
                         help="overwrite existing canonical state")
+    p_init.add_argument("--target", type=str, default=None,
+                        help="init only this target (e.g. bookmarks)")
 
     p_adopt = sub.add_parser("adopt", help="first-time on a new device")
     p_adopt.add_argument("--yes", "-y", action="store_true",

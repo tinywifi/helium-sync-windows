@@ -73,7 +73,7 @@ helium-sync import file.json [--target bookmarks] [--allow-helium-running]
 ### maintenance
 
 ```
-helium-sync init      lower-level: bootstrap on the source-of-truth device
+helium-sync init      lower-level: bootstrap on the source-of-truth device (--force, --target)
 helium-sync adopt     lower-level: bootstrap on a new device receiving canonical
 helium-sync gc        prune logs/ backups older than 30 days (--keep-days, --dry-run)
 ```

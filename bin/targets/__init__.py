@@ -53,7 +53,7 @@ All commands auto-relaunch under .venv/Scripts/python.exe if not already.
   completion     — generate PowerShell or cmd.exe completion scripts (--shell powershell|cmd)
 
 ### Maintenance
-  init           — lower-level: bootstrap on source-of-truth device (--force)
+  init           — lower-level: bootstrap on source-of-truth device (--force, --target)
   adopt          — lower-level: bootstrap on new device receiving canonical (--yes)
   gc             — prune logs/ backups older than 30 days (--keep-days, --dry-run)
 
