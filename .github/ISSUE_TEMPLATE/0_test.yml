@@ -1,0 +1,11 @@
+name: Test form
+description: Testing if YAML forms render
+title: "test: "
+body:
+  - type: input
+    id: test
+    attributes:
+      label: Test field
+      placeholder: type something
+    validations:
+      required: true
