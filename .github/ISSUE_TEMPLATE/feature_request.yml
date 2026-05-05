@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest a new sync target, CLI command, or enhancement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the actual end goal, not the solution
+      placeholder: "e.g. I want my custom search engines synced across devices"
+    validations:
+      required: true
+
+  - type: textarea
+    id: considered
+    attributes:
+      label: What have you considered?
+      description: Why doesn't the existing setup do this? What workarounds did you try?
+    validations:
+      required: true
+
+  - type: textarea
+    id: fit
+    attributes:
+      label: How might it fit?
+      description: If you've thought about implementation: which Target module? Does it need new Helium-side reads/writes?
+
+  - type: markdown
+    attributes:
+      value: |
+        **Scope check** — helium-sync deliberately declines:
+        - Linux / macOS support (Windows-only; upstream is macOS)
+        - Bidirectional *automatic* merge (manual resolution via `resolve`)
+        - Browser-extension form factor
+        - History/cookies/passwords/extensions/settings sync
+
+  - type: checkboxes
+    id: scope_confirm
+    attributes:
+      label: This request does NOT overlap with any of the above declined items
+      options:
+        - label: "I confirm this falls within project scope"
+          required: true

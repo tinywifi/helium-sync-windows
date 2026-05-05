@@ -1,0 +1,61 @@
+name: Setup / config help
+description: Stuck on first-time setup, repo configuration, or sync
+labels: [question]
+body:
+  - type: textarea
+    id: version
+    attributes:
+      label: `helium-sync version`
+      description: Run `helium-sync version`
+      placeholder: "e.g. v0.2.0, git e7661bc"
+      render: text
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: `helium-sync doctor`
+      description: Run `helium-sync doctor`
+      placeholder: "Paste the full output"
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How did you install?
+      options:
+        - Scoop
+        - From source (git clone)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where are you stuck?
+      options:
+        - Initial `helium-sync setup`
+        - Creating / connecting git remote
+        - First `push` fails
+        - First `pull` fails
+        - `helium-sync status` shows unexpected state
+        - Scoop installation
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What's happening?
+      description: Describe the problem and paste any output or error
+      placeholder: "e.g. `helium-sync setup` hangs at 'Creating git remote...'"
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Any troubleshooting steps already attempted?

@@ -1,0 +1,121 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Quick summary
+      description: What broke, and when did it start?
+      placeholder: "e.g. `helium-sync pull` fails with exit code 5 after I pushed from my laptop"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        **Environment info** — paste the output of these commands.
+
+  - type: textarea
+    id: version
+    attributes:
+      label: `helium-sync version`
+      description: Run `helium-sync version` in your terminal
+      placeholder: "e.g. v0.2.0, git e7661bc, Python 3.12.4"
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: `helium-sync doctor`
+      description: Run `helium-sync doctor` in your terminal
+      placeholder: "Paste the full output here"
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: `helium-sync status`
+      description: Run `helium-sync status` in your terminal
+      placeholder: "Paste the output here"
+      render: text
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How did you install?
+      options:
+        - Scoop
+        - From source (git clone)
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Numbered steps to reproduce the issue
+      placeholder: |
+        1. Run `helium-sync push`
+        2. ...
+        3. Error appears
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: Paste the full output or traceback
+      placeholder: "..."
+      render: text
+    validations:
+      required: true
+
+  - type: dropdown
+    id: divergences
+    attributes:
+      label: Were there divergent changes on another device?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: helium_running
+    attributes:
+      label: Was Helium running when this happened?
+      options:
+        - Running
+        - Quit / closed
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: worked_before
+    attributes:
+      label: Did this work before on this machine?
+      options:
+        - Yes, since version ___
+        - No, first time running
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target
+    attributes:
+      label: Which target is affected?
+      options:
+        - Bookmarks
+        - Saved tab groups
+        - Both
+        - Not sure
+    validations:
+      required: true
