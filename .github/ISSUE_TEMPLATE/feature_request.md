@@ -25,10 +25,10 @@ Before submitting, please confirm this falls within the scope set in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#scope). The project deliberately
 declines:
 
-- Linux/Windows support
-- Bidirectional automatic merge
+- Linux / macOS support (Windows-only fork; upstream [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync) is macOS)
+- Bidirectional *automatic* merge (manual conflict resolution available via `helium-sync resolve`)
 - Browser-extension form factor
-- History/cookies/passwords/extensions sync
+- History/cookies/passwords/extensions/settings sync
 
 If your idea overlaps with one of those, the answer is probably "won't
 do" — but please open the issue anyway if you think there's a way to
