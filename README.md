@@ -1,5 +1,10 @@
 # helium-sync (Windows)
 
+[![tests](https://github.com/tinywifi/helium-sync-windows/actions/workflows/test.yml/badge.svg)](https://github.com/tinywifi/helium-sync-windows/actions/workflows/test.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+This is a Windows fork of [`aadarwal/helium-sync`](https://github.com/aadarwal/helium-sync), which was originally macOS-only. This fork rewrites the tool in Go for Windows.
+
 Bidirectional sync of Helium browser bookmarks and saved tab groups across Windows machines, using your own private git repo as the transport.
 
 ```powershell
@@ -9,7 +14,24 @@ helium-sync pull     # git pull -> write canonical state to live profile
 
 Two devices, one user, sequential. Last push wins. Close Helium before `pull`; `push` can read bookmarks while Helium is running.
 
-## Install From Source
+## Install
+
+### via Scoop
+
+```powershell
+scoop bucket add tinywifi https://github.com/tinywifi/scoop-bucket
+scoop update
+scoop install helium-sync
+```
+
+If you already have it installed:
+
+```powershell
+scoop update
+scoop update helium-sync
+```
+
+### from source
 
 ```powershell
 git clone https://github.com/tinywifi/helium-sync-windows
@@ -70,25 +92,6 @@ Shared flags:
 - `--target <bookmarks|saved_tab_groups>`: limit commands to one target.
 - `--strict`: fail `push` on validation warnings.
 - `--allow-helium-running`: bypass write guard for tests.
-
-## Architecture
-
-The project is now a Go CLI.
-
-- `cmd/helium-sync`: command-line flag parsing and dispatch.
-- `internal/heliumsync`: sync workflows, targets, import/export, restore, resolver TUI, and utilities.
-- `internal/heliumsync/bookmarks.go`: Chromium bookmark JSON handling.
-- `internal/heliumsync/saved_tab_groups.go`: saved tab group state handling.
-- `internal/heliumsync/leveldb.go`: LevelDB read/write support via `syndtr/goleveldb`.
-- `internal/heliumsync/protowire_saved_tab_groups.go`: direct protobuf wire encode/decode for Chromium saved tab group specifics.
-
-Charm libraries are used throughout the Go port:
-
-- Bubble Tea, Bubble Tree, and Bubbles for the interactive resolver UI.
-- Huh for setup/adopt prompts.
-- Lip Gloss for terminal styling.
-- Log for structured internal logging.
-- Harmonica for resolver animation state.
 
 ## Synced Data
 
