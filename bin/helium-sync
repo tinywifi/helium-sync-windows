@@ -39,12 +39,14 @@ if _venv_py.exists() and Path(sys.executable).resolve() != _venv_py.resolve():
 # Now under .venv (or the user accepted system python).
 # ──────────────────────────────────────────────────────────────────────────
 import argparse
+import json
 import os
 import re
 import shutil
 import socket
 import subprocess
 import tomllib
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(_self.parent))
@@ -66,6 +68,7 @@ def _default_profile() -> Path:
 DEFAULT_REPO = _self.parent.parent
 DEFAULT_CONFIG = _default_config()
 DEFAULT_PROFILE = _default_profile()
+LATEST_RELEASE_URL = "https://api.github.com/repos/tinywifi/helium-sync-windows/releases/latest"
 
 # Resolved at runtime — bound by main() before any cmd_* runs.
 REPO_ROOT: Path = DEFAULT_REPO
@@ -179,6 +182,59 @@ def _git_revision() -> str:
         capture_output=True, text=True, check=False,
     )
     return (desc.stdout or "not available").strip()
+
+
+def _version_tuple(version: str) -> tuple[int, ...] | None:
+    match = re.match(r"^v?(\d+)\.(\d+)\.(\d+)", version)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _latest_release_version() -> str | None:
+    try:
+        req = urllib.request.Request(
+            LATEST_RELEASE_URL,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "helium-sync",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=2) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return None
+    tag = payload.get("tag_name")
+    if isinstance(tag, str) and tag:
+        return tag[1:] if tag.startswith("v") else tag
+    return None
+
+
+def _update_banner(current: str, latest: str) -> str:
+    lines = [
+        f" Update available: helium-sync {current} -> {latest} ",
+        " Run: scoop update && scoop update helium-sync ",
+    ]
+    width = max(len(line) for line in lines)
+    border = "+" + "-" * width + "+"
+    body = [border]
+    body.extend("|" + line.ljust(width) + "|" for line in lines)
+    body.append(border)
+    return "\n".join(body)
+
+
+def maybe_show_update_banner() -> None:
+    if os.environ.get("HELIUM_SYNC_NO_UPDATE_CHECK"):
+        return
+    current = _app_version()
+    current_tuple = _version_tuple(current)
+    if current_tuple is None:
+        return
+    latest = _latest_release_version()
+    latest_tuple = _version_tuple(latest or "")
+    if latest and latest_tuple and latest_tuple > current_tuple:
+        print(_update_banner(current, latest))
+        print()
 
 
 def log(msg: str) -> None:
@@ -780,6 +836,8 @@ def main() -> int:
     REPO_ROOT = _resolve_repo(args.repo, os.environ, DEFAULT_CONFIG)
     STATE_DIR = REPO_ROOT / "state"
     LOGS_DIR = REPO_ROOT / "logs"
+
+    maybe_show_update_banner()
 
     handler = {
         "setup":  cmd_setup,

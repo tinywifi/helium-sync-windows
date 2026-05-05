@@ -150,6 +150,29 @@ class TestHeliumRunning(unittest.TestCase):
             self.assertFalse(self.cli.helium_running())
 
 
+class TestUpdateBanner(unittest.TestCase):
+    def setUp(self):
+        self.cli = _import_cli()
+
+    def test_version_tuple_parses_semver_prefix(self):
+        self.assertEqual(self.cli._version_tuple("0.1.2"), (0, 1, 2))
+        self.assertEqual(self.cli._version_tuple("v0.1.2"), (0, 1, 2))
+        self.assertEqual(self.cli._version_tuple("0.1.2-3-gabc"), (0, 1, 2))
+        self.assertIsNone(self.cli._version_tuple("unknown"))
+
+    def test_update_banner_contains_command(self):
+        banner = self.cli._update_banner("0.1.2", "0.1.3")
+        self.assertIn("Update available: helium-sync 0.1.2 -> 0.1.3", banner)
+        self.assertIn("scoop update && scoop update helium-sync", banner)
+
+    def test_no_banner_when_latest_is_not_newer(self):
+        with mock.patch.object(self.cli, "_app_version", return_value="0.1.3"), \
+             mock.patch.object(self.cli, "_latest_release_version", return_value="0.1.3"), \
+             mock.patch("builtins.print") as print_mock:
+            self.cli.maybe_show_update_banner()
+        print_mock.assert_not_called()
+
+
 class FakeTarget:
     name = "fake_bookmarks"
     state_filename = "fake_bookmarks.json"
