@@ -17,8 +17,9 @@
         }
     },
     "post_install": [
-        "python -m venv \"$dir\\.venv\"",
-        "& \"$dir\\.venv\\Scripts\\pip\" install --quiet -r \"$dir\\requirements.txt\""
+        "$install_dir = Join-Path $appdir $version",
+        "python -m venv \"$install_dir\\.venv\"",
+        "& \"$install_dir\\.venv\\Scripts\\python\" -m pip install --quiet -r \"$install_dir\\requirements.txt\""
     ],
     "bin": [["bin\\helium-sync.bat", "helium-sync"]],
     "checkver": {
