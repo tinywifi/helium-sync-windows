@@ -80,7 +80,85 @@ jobs:
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-          $notes = (Get-Content ".github\release-notes-template.md" -Raw).Replace("{{TAG}}", $tag)
+
+          # Find the previous tag (if any)
+          $allTags = git tag --sort=-v:refname
+          $prevTag = ""
+          for ($i = 0; $i -lt $allTags.Count; $i++) {
+            if ($allTags[$i] -eq $tag -and $i + 1 -lt $allTags.Count) {
+              $prevTag = $allTags[$i + 1]
+              break
+            }
+          }
+
+          # Get commits since previous tag (or all if first release)
+          if ($prevTag) {
+            $logRange = "$prevTag..HEAD"
+          } else {
+            $logRange = "HEAD"
+          }
+          $commits = git log $logRange --oneline --no-merges
+
+          # Generate highlights from conventional commits
+          $highlights = @()
+          # Verbs to strip from commit subject to avoid "Added add ..." redundancy
+          $stripVerbs = '^(add|adds|added|fix|fixes|fixed|update|updates|updated|implement|implements|implemented|refactor|refactors|refactored|remove|removes|removed|improve|improves|improved|introduce|introduced|create|creates|created)\s+'
+
+          $featCommits = $commits | Where-Object { $_ -match "^[\da-f]+ feat(\(.+\))?:\s*(.+)" }
+          $fixCommits = $commits | Where-Object { $_ -match "^[\da-f]+ fix(\(.+\))?:\s*(.+)" }
+          $docsCommits = $commits | Where-Object { $_ -match "^[\da-f]+ docs(\(.+\))?:\s*(.+)" }
+          $otherCommits = $commits | Where-Object { $_ -notmatch "^[\da-f]+ (feat|fix|docs|ci|test|chore|build)(\(.+\))?:\s*" }
+
+          if ($featCommits.Count -gt 0) {
+            $highlights += ($featCommits | ForEach-Object {
+              $msg = ($_ -replace "^[\da-f]+\s+(feat(\(.+\))?:\s*)", "").Trim()
+              $msg = ($msg -replace $stripVerbs, "").Trim()
+              if ($msg) { "- Added $msg" } else { "- Added $($_ -replace '^[\da-f]+\s+feat(\(.+\))?:\s*', '').Trim()" }
+            }) -join "`n"
+          }
+          if ($fixCommits.Count -gt 0) {
+            $highlights += ($fixCommits | ForEach-Object {
+              $msg = ($_ -replace "^[\da-f]+\s+(fix(\(.+\))?:\s*)", "").Trim()
+              $msg = ($msg -replace $stripVerbs, "").Trim()
+              if ($msg) { "- Fixed $msg" } else { "- Fixed $($_ -replace '^[\da-f]+\s+fix(\(.+\))?:\s*', '').Trim()" }
+            }) -join "`n"
+          }
+          if ($docsCommits.Count -gt 0) {
+            $highlights += ($docsCommits | ForEach-Object {
+              $msg = ($_ -replace "^[\da-f]+\s+(docs(\(.+\))?:\s*)", "").Trim()
+              $msg = ($msg -replace $stripVerbs, "").Trim()
+              if ($msg) { "- Updated $msg" } else { "- Updated $($_ -replace '^[\da-f]+\s+docs(\(.+\))?:\s*', '').Trim()" }
+            }) -join "`n"
+          }
+          if ($otherCommits.Count -gt 0) {
+            $highlights += ($otherCommits | ForEach-Object {
+              $msg = ($_ -replace "^[\da-f]+\s+", "").Trim()
+              "- $msg"
+            }) -join "`n"
+          }
+
+          # Generate "should you update" summary
+          $commitCount = $commits.Count
+          if ($featCommits.Count -gt 0 -and $fixCommits.Count -gt 0) {
+            $shouldUpdate = "Yes. This release adds new features and fixes."
+          } elseif ($featCommits.Count -gt 0) {
+            $shouldUpdate = "Yes. This release adds new features."
+          } elseif ($fixCommits.Count -gt 0) {
+            $shouldUpdate = "Yes. This release contains important fixes."
+          } elseif ($commitCount -gt 0) {
+            $shouldUpdate = "Recommended. Contains $commitCount change(s)."
+          } else {
+            $shouldUpdate = "Minor release — review the changes below."
+          }
+
+          # Substitute placeholders
+          $template = Get-Content ".github\release-notes-template.md" -Raw
+          $notes = $template.Replace("{{TAG}}", $tag).Replace("{{SHOULD_UPDATE}}", $shouldUpdate)
+          if ($highlights -join "" -eq "") {
+            $notes = $notes.Replace("{{HIGHLIGHTS}}", "No user-facing changes.")
+          } else {
+            $notes = $notes.Replace("{{HIGHLIGHTS}}", ($highlights -join "`n"))
+          }
           $notes | Set-Content "dist\release-notes.md" -Encoding utf8
 
       - name: publish release
