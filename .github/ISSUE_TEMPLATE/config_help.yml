@@ -1,0 +1,29 @@
+name: Setup / config help
+description: Stuck on first-time setup, repo configuration, or sync
+title: "[Help]: "
+labels:
+  - question
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to set up?
+      placeholder: "e.g. First-time setup fails at git remote, or pull hangs"
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: helium-sync doctor output
+      description: Run helium-sync doctor and paste the output
+      placeholder: "Paste the full output here"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: What have you tried?
+      description: List the steps you have taken so far

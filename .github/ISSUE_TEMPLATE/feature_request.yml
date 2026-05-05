@@ -25,18 +25,4 @@ body:
     id: fit
     attributes:
       label: How might it fit?
-      description: If you've thought about implementation: which Target module? Does it need new Helium-side reads/writes?
-
-  - type: checkboxes
-    id: scope_confirm
-    attributes:
-      label: This request does NOT overlap with any declined items
-      description: |
-        helium-sync deliberately declines:
-        - Linux / macOS support (Windows-only; upstream is macOS)
-        - Bidirectional *automatic* merge (manual resolution via `resolve`)
-        - Browser-extension form factor
-        - History/cookies/passwords/extensions/settings sync
-      options:
-        - label: I confirm this falls within project scope
-          required: true
+      description: If you have thought about implementation, which Target module? Does it need new Helium-side reads or writes?
