@@ -21,6 +21,15 @@
         "python -m venv \"$install_dir\\.venv\"",
         "& \"$install_dir\\.venv\\Scripts\\python\" -m pip install --quiet -r \"$install_dir\\requirements.txt\""
     ],
+    "notes": [
+        "helium-sync stores user config outside the Scoop app directory at %APPDATA%\\helium-sync\\config.toml.",
+        "Your sync data repo is not removed by Scoop uninstall. Check `helium-sync doctor` or the config file for its path.",
+        "To fully remove local config after uninstall, delete %APPDATA%\\helium-sync manually."
+    ],
+    "post_uninstall": [
+        "Write-Host \"helium-sync config and sync data were left in place.\"",
+        "Write-Host \"Delete %APPDATA%\\helium-sync manually only if you no longer need this device config.\""
+    ],
     "bin": [["bin\\helium-sync.bat", "helium-sync"]],
     "checkver": {
         "github": "https://github.com/tinywifi/helium-sync-windows"
