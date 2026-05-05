@@ -1,50 +1,87 @@
 name: release
 
 # Triggered when a `v*` tag is pushed (e.g., `v0.1.0`).
-# Cross-compiles `leveldb-writer` for macOS arm64 and amd64, attaches the
-# binaries to a GitHub Release. Users without Go installed can download
-# the prebuilt binary for their arch instead of running bin/_go/build.sh.
+# Produces:
+#   leveldb-writer-windows-amd64.exe  — standalone binary (amd64)
+#   leveldb-writer-windows-arm64.exe  — standalone binary (arm64)
+#   helium-sync-windows-{tag}-amd64.zip  — Scoop / manual install (amd64)
+#   helium-sync-windows-{tag}-arm64.zip  — Scoop / manual install (arm64)
 
 on:
   push:
     tags: ['v*']
 
 permissions:
-  contents: write   # create / update the release
+  contents: write
 
 jobs:
   release:
-    name: build binaries + publish release
-    runs-on: macos-14
+    name: build + publish release
+    runs-on: windows-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version: "1.26"
 
-      - name: cross-compile for darwin/arm64 and darwin/amd64
+      - name: build leveldb-writer for amd64 and arm64
+        shell: pwsh
         run: |
-          mkdir -p dist
-          cd bin/_go/leveldb_writer
-          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" \
-              -o ../../../dist/leveldb-writer-darwin-arm64 .
-          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" \
-              -o ../../../dist/leveldb-writer-darwin-amd64 .
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Set-Location bin\_go\leveldb_writer
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -trimpath -ldflags="-s -w" `
+            -o ..\..\..\dist\leveldb-writer-windows-amd64.exe .
+          $env:GOARCH = "arm64"
+          go build -trimpath -ldflags="-s -w" `
+            -o ..\..\..\dist\leveldb-writer-windows-arm64.exe .
 
-      - name: verify architecture of each artifact
+      - name: create release ZIPs for Scoop
+        shell: pwsh
         run: |
-          set -e
-          file dist/leveldb-writer-darwin-arm64 | grep -q "Mach-O 64-bit executable arm64"
-          file dist/leveldb-writer-darwin-amd64 | grep -q "Mach-O 64-bit executable x86_64"
-          ls -la dist/
+          $tag = "${{ github.ref_name }}"
+
+          foreach ($arch in @("amd64", "arm64")) {
+            $stage = "staging\$arch"
+            New-Item -ItemType Directory -Force "$stage\bin\targets\_proto" | Out-Null
+
+            # Python sources
+            Copy-Item bin\helium-sync        "$stage\bin\helium-sync"
+            Copy-Item bin\helium-sync.bat    "$stage\bin\helium-sync.bat"
+            Copy-Item bin\targets\__init__.py      "$stage\bin\targets\__init__.py"
+            Copy-Item bin\targets\bookmarks.py     "$stage\bin\targets\bookmarks.py"
+            Copy-Item bin\targets\saved_tab_groups.py "$stage\bin\targets\saved_tab_groups.py"
+            Copy-Item bin\targets\_proto\local_entity_wrapper_pb2.py `
+                      "$stage\bin\targets\_proto\local_entity_wrapper_pb2.py"
+            Copy-Item bin\targets\_proto\saved_tab_group_specifics_pb2.py `
+                      "$stage\bin\targets\_proto\saved_tab_group_specifics_pb2.py"
+            Copy-Item bin\targets\_proto\tab_group_attribution_metadata_pb2.py `
+                      "$stage\bin\targets\_proto\tab_group_attribution_metadata_pb2.py"
+            Copy-Item requirements.txt "$stage\requirements.txt"
+
+            # Pre-built binary for this arch
+            Copy-Item "dist\leveldb-writer-windows-$arch.exe" `
+                      "$stage\bin\leveldb-writer.exe"
+
+            # ZIP it
+            Compress-Archive -Path "$stage\*" `
+              -DestinationPath "dist\helium-sync-windows-$tag-$arch.zip"
+          }
+
+      - name: verify artifacts
+        shell: pwsh
+        run: Get-ChildItem dist\
 
       - name: publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/leveldb-writer-darwin-arm64
-            dist/leveldb-writer-darwin-amd64
+            dist/leveldb-writer-windows-amd64.exe
+            dist/leveldb-writer-windows-arm64.exe
+            dist/helium-sync-windows-*-amd64.zip
+            dist/helium-sync-windows-*-arm64.zip
           generate_release_notes: true
           fail_on_unmatched_files: true

@@ -45,7 +45,7 @@ class TestResolveRepo(unittest.TestCase):
         cli_dir = self.tmp_path / "from_cli"
         cli_dir.mkdir()
         cfg_file = self.tmp_path / "config.toml"
-        cfg_file.write_text(f'repo = "{self.tmp_path}/from_cfg"\n')
+        cfg_file.write_text(f'repo = "{(self.tmp_path / "from_cfg").as_posix()}"\n')
 
         got = self.cli._resolve_repo(
             cli_arg=cli_dir,
@@ -58,7 +58,7 @@ class TestResolveRepo(unittest.TestCase):
         env_dir = self.tmp_path / "from_env"
         env_dir.mkdir()
         cfg_file = self.tmp_path / "config.toml"
-        cfg_file.write_text(f'repo = "{self.tmp_path}/from_cfg"\n')
+        cfg_file.write_text(f'repo = "{(self.tmp_path / "from_cfg").as_posix()}"\n')
 
         got = self.cli._resolve_repo(
             cli_arg=None,
@@ -71,7 +71,7 @@ class TestResolveRepo(unittest.TestCase):
         cfg_dir = self.tmp_path / "from_cfg"
         cfg_dir.mkdir()
         cfg_file = self.tmp_path / "config.toml"
-        cfg_file.write_text(f'repo = "{cfg_dir}"\n')
+        cfg_file.write_text(f'repo = "{cfg_dir.as_posix()}"\n')
 
         got = self.cli._resolve_repo(
             cli_arg=None,

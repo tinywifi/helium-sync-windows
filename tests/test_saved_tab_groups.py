@@ -1,6 +1,6 @@
 """Tests for the saved tab groups sync target.
 
-Run from the repo root: python3 -m unittest discover tests/
+Run from the repo root: python -m unittest discover tests/
 """
 
 import os
@@ -14,10 +14,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
 from targets.saved_tab_groups import (  # noqa: E402
     KEY_PREFIX,
     SavedTabGroups,
-    _parse_ldb,
-    _parse_log,
-    _unescape,
+    _read_leveldb,
 )
+
+
+def _default_profile() -> Path:
+    if sys.platform == "win32":
+        localappdata = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(localappdata) / "imput" / "Helium" / "User Data"
+    return Path.home() / "Library/Application Support/net.imput.helium"
+
+
+def _leveldb_writer() -> Path:
+    name = "leveldb-writer.exe" if sys.platform == "win32" else "leveldb-writer"
+    return Path(__file__).resolve().parent.parent / "bin" / name
 
 
 # --------------------------------------------------------------------------- #
@@ -50,83 +60,6 @@ def state(groups=None, tabs=None):
 
 
 # --------------------------------------------------------------------------- #
-# Unescape — leveldbutil's escape format
-# --------------------------------------------------------------------------- #
-
-class TestUnescape(unittest.TestCase):
-    def test_plain_ascii(self):
-        self.assertEqual(_unescape("hello"), b"hello")
-
-    def test_hex_escape(self):
-        self.assertEqual(_unescape("\\x0a"), b"\x0a")
-
-    def test_mixed(self):
-        self.assertEqual(_unescape("a\\x00b"), b"a\x00b")
-
-    def test_literal_backslash_followed_by_hex_escape(self):
-        # leveldbutil emits a literal backslash byte (0x5C) as bare `\`,
-        # then the next byte 0x0A as `\x0a`. The 5-char input is 2 bytes out.
-        self.assertEqual(_unescape("\\\\x0a"), b"\\\x0a")
-
-    def test_literal_backslash_followed_by_literal_x(self):
-        # Bare backslash followed by `x` and non-hex chars stays literal.
-        self.assertEqual(_unescape("\\xy"), b"\\xy")
-
-    def test_utf8_multibyte(self):
-        # UTF-8 `·` (U+00B7) is bytes 0xC2 0xB7. leveldbutil emits both as
-        # `\xc2\xb7` because they're outside printable ASCII range.
-        self.assertEqual(_unescape("\\xc2\\xb7"), b"\xc2\xb7")
-
-    def test_high_bit_in_string(self):
-        # Field-7 varint=1 emits as `8\x01` (the `8` is `\x38` which is
-        # printable; the next byte is non-printable).
-        self.assertEqual(_unescape("8\\x01"), b"8\x01")
-
-
-# --------------------------------------------------------------------------- #
-# Dump-line parsers
-# --------------------------------------------------------------------------- #
-
-class TestParsers(unittest.TestCase):
-    def test_parse_ldb_one_line(self):
-        text = "'mykey' @ 42 : val => '\\x08\\x01'\n"
-        out = list(_parse_ldb(text))
-        self.assertEqual(out, [("mykey", 42, b"\x08\x01")])
-
-    def test_parse_ldb_skips_unrelated(self):
-        text = (
-            "Some banner\n"
-            "'mykey' @ 7 : val => 'abc'\n"
-            "blank line\n"
-        )
-        self.assertEqual(list(_parse_ldb(text)), [("mykey", 7, b"abc")])
-
-    def test_parse_log_increments_seq(self):
-        text = (
-            "--- offset 0; sequence 100\n"
-            "  put 'a' '\\x01'\n"
-            "  put 'b' '\\x02'\n"
-            "  del 'c'\n"
-        )
-        out = list(_parse_log(text))
-        self.assertEqual(out, [
-            ("a", 100, b"\x01"),
-            ("b", 101, b"\x02"),
-            ("c", 102, None),
-        ])
-
-    def test_parse_log_multiple_batches(self):
-        text = (
-            "--- offset 0; sequence 100\n"
-            "  put 'a' 'x'\n"
-            "--- offset 50; sequence 200\n"
-            "  put 'b' 'y'\n"
-        )
-        out = list(_parse_log(text))
-        self.assertEqual(out, [("a", 100, b"x"), ("b", 200, b"y")])
-
-
-# --------------------------------------------------------------------------- #
 # Serialize / deserialize / semantic equality
 # --------------------------------------------------------------------------- #
 
@@ -148,7 +81,6 @@ class TestSerialize(unittest.TestCase):
             groups=[group("b", "bbb"), group("a", "aaa")],
             tabs=[tab("y", "a", "u2", "tt2"), tab("x", "a", "u1", "tt1")],
         )
-        # Build s2 with different insertion order; serialize must produce the same bytes.
         s2 = state(
             groups=[group("a", "aaa"), group("b", "bbb")],
             tabs=[tab("x", "a", "u1", "tt1"), tab("y", "a", "u2", "tt2")],
@@ -198,25 +130,27 @@ class TestSemanticEqual(unittest.TestCase):
 # --------------------------------------------------------------------------- #
 
 class TestRealHelium(unittest.TestCase):
-    REAL_PROFILE = Path(os.environ.get("HELIUM_PROFILE", str(Path.home() / "Library/Application Support/net.imput.helium")))
+    REAL_PROFILE = Path(os.environ.get("HELIUM_PROFILE", str(_default_profile())))
 
     def setUp(self):
         if not (self.REAL_PROFILE / "Default" / "Sync Data" / "LevelDB").exists():
             self.skipTest("real Helium LevelDB not available on this machine")
+        if not _leveldb_writer().exists():
+            self.skipTest("leveldb-writer not built")
         self.t = SavedTabGroups()
 
     def test_extract_real_profile(self):
         data = self.t.extract(self.REAL_PROFILE)
-        self.assertGreater(len(data["groups"]), 0)
-        # Every tab references a real group GUID
+        self.assertIn("groups", data)
+        self.assertIn("tabs", data)
+        if not data["groups"]:
+            return  # no saved tab groups yet — structure is valid, nothing more to check
         group_guids = set(data["groups"])
         for tid, t in data["tabs"].items():
             self.assertIn(t["group_guid"], group_guids,
                           f"tab {tid} references unknown group {t['group_guid']}")
-        # Every group has a non-empty title
         for g in data["groups"].values():
             self.assertNotEqual(g["title"], "")
-        # URLs look like URLs
         for t in data["tabs"].values():
             self.assertTrue(
                 t["url"].startswith(("http://", "https://", "chrome://", "file://")),
@@ -235,21 +169,21 @@ class TestRealHelium(unittest.TestCase):
 
 
 class TestApply(unittest.TestCase):
-    """Apply tests need a real LevelDB seeded from the user's live profile.
-    Each test copies the live LevelDB to a tmpdir and operates there.
+    """Apply tests operate on a tmpdir copy of the live LevelDB.
     The live profile is never modified.
     """
 
-    REAL_PROFILE = Path(os.environ.get("HELIUM_PROFILE", str(Path.home() / "Library/Application Support/net.imput.helium")))
+    REAL_PROFILE = Path(os.environ.get("HELIUM_PROFILE", str(_default_profile())))
 
     def setUp(self):
         if not (self.REAL_PROFILE / "Default" / "Sync Data" / "LevelDB").exists():
             self.skipTest("real Helium LevelDB not available")
-        writer = Path(__file__).resolve().parent.parent / "bin" / "leveldb-writer"
-        if not writer.exists():
-            self.skipTest("leveldb-writer not built (run go build in bin/_go/leveldb_writer)")
+        if not _leveldb_writer().exists():
+            self.skipTest("leveldb-writer not built")
         self.t = SavedTabGroups()
         self.original = self.t.extract(self.REAL_PROFILE)
+        if not self.original["groups"]:
+            self.skipTest("no saved tab groups in Helium — create some first")
 
     def _make_test_profile(self):
         import shutil, tempfile
@@ -277,7 +211,6 @@ class TestApply(unittest.TestCase):
         got = self.t.extract(tmp)
 
         self.assertEqual(got["tabs"][target_guid]["title"], "MODIFIED")
-        # Other tabs unchanged
         for guid, t in self.original["tabs"].items():
             if guid != target_guid:
                 self.assertEqual(got["tabs"][guid]["title"], t["title"])
@@ -329,37 +262,23 @@ class TestApply(unittest.TestCase):
         tmp = self._make_test_profile()
         backup_dir = tmp / "logs"
         self.t.apply(tmp, self.original, backup_dir)
-        # Backup directory should now contain the pre-modification LevelDB
         self.assertTrue((backup_dir / "LevelDB").exists())
         self.assertTrue(any((backup_dir / "LevelDB").iterdir()))
 
     def test_other_keys_untouched(self):
         """web_apps-* and metadata keys must survive an apply."""
-        from targets.saved_tab_groups import _parse_ldb, _parse_log, _run_leveldbutil
-
-        ldb_dir = lambda profile: profile / "Default" / "Sync Data" / "LevelDB"
-
-        def all_keys(profile):
-            """Properly-parsed set of keys (ignores value blobs)."""
-            keys = set()
-            d = ldb_dir(profile)
-            for f in d.glob("*.ldb"):
-                for k, _, _ in _parse_ldb(_run_leveldbutil(f)):
-                    keys.add(k)
-            for f in d.glob("*.log"):
-                for k, _, v in _parse_log(_run_leveldbutil(f)):
-                    if v is not None:  # ignore tombstones
-                        keys.add(k)
-            return keys
+        ldb_dir = lambda p: p / "Default" / "Sync Data" / "LevelDB"
 
         def non_stg_keys(profile):
-            return {k for k in all_keys(profile) if not k.startswith(KEY_PREFIX)}
+            return {
+                e["key"] for e in _read_leveldb(ldb_dir(profile))
+                if not e["key"].startswith(KEY_PREFIX)
+            }
 
         tmp = self._make_test_profile()
         before = non_stg_keys(tmp)
         self.t.apply(tmp, self.original, tmp / "logs")
         after = non_stg_keys(tmp)
-        # Every non-saved_tab_group key that was there before must still be there.
         missing = before - after
         self.assertFalse(missing, f"lost non-saved_tab_group keys: {missing}")
 

@@ -1,31 +1,27 @@
 """Saved tab groups sync target.
 
-Reads from Helium's Sync Data LevelDB without quitting the browser by shelling
-out to `leveldbutil dump`, which reads .ldb and .log files directly without
-contending for the LevelDB lock that Helium holds while running.
+Reads from and writes to Helium's Sync Data LevelDB via the bundled
+`leveldb-writer` binary (bin/leveldb-writer[.exe]). The binary must be built
+from bin/_go/ before use.
+
+Because the Go reader uses LevelDB's standard open (which acquires the LOCK
+file), Helium must be quit before extract() or apply() is called. The CLI
+guards this at the command level.
 
 Each entry under `saved_tab_group-dt-<UUID>` is a sync-engine local-model
-envelope (LocalEntityWrapper, reconstructed from observation) wrapping a
-SavedTabGroupSpecifics proto from upstream Chromium. LevelDB keeps multiple
-versions per key (sequence-numbered); we deduplicate by keeping the highest
-sequence number across all .ldb and .log files in the directory.
-
-Phase C: extract + serialize + deserialize + semantically_equal (this file).
-Phase D: apply (writeback to live LevelDB; requires Helium quit).
+envelope (LocalEntityWrapper) wrapping a SavedTabGroupSpecifics proto from
+upstream Chromium.
 """
 
 from __future__ import annotations
 
 import json
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-# The generated .pb2 files use absolute imports (the way protoc emits them by
-# default). Add the proto dir to sys.path so they can find each other.
 _PROTO_DIR = Path(__file__).resolve().parent / "_proto"
 sys.path.insert(0, str(_PROTO_DIR))
 import local_entity_wrapper_pb2 as _wrapper_pb       # noqa: E402
@@ -33,18 +29,6 @@ import saved_tab_group_specifics_pb2 as _stg_pb      # noqa: E402
 
 
 KEY_PREFIX = "saved_tab_group-dt-"
-
-# `leveldbutil dump <file.ldb>` produces:
-#   'key' @ seqnum : val => 'val'
-_LDB_LINE = re.compile(r"^'(?P<key>.+?)' @ (?P<seq>\d+) : val => '(?P<val>.*)'$")
-
-# `leveldbutil dump <file.log>` produces write batches:
-#   --- offset N; sequence S
-#     put 'key' 'val'
-#     del 'key'
-_LOG_HEADER = re.compile(r"^--- offset \d+; sequence (?P<seq>\d+)$")
-_LOG_PUT = re.compile(r"^  put '(?P<key>.+?)' '(?P<val>.*)'$")
-_LOG_DEL = re.compile(r"^  del '(?P<key>.+?)'$")
 
 
 class SavedTabGroups:
@@ -55,7 +39,7 @@ class SavedTabGroups:
         return profile_dir / "Default" / "Sync Data" / "LevelDB"
 
     # ------------------------------------------------------------------ #
-    # Extract — safe while Helium runs
+    # Extract — Helium must be quit
     # ------------------------------------------------------------------ #
 
     def extract(self, profile_dir: Path) -> dict:
@@ -63,29 +47,17 @@ class SavedTabGroups:
         if not ldb_dir.exists():
             raise FileNotFoundError(f"no LevelDB at {ldb_dir}")
 
-        # key -> (highest_seqnum, value_bytes_or_None_for_tombstone)
-        latest: dict[str, tuple[int, bytes | None]] = {}
-
-        for path in sorted(ldb_dir.glob("*.ldb")):
-            for key, seq, val in _parse_ldb(_run_leveldbutil(path)):
-                cur = latest.get(key)
-                if cur is None or seq > cur[0]:
-                    latest[key] = (seq, val)
-
-        for path in sorted(ldb_dir.glob("*.log")):
-            for key, seq, val in _parse_log(_run_leveldbutil(path)):
-                cur = latest.get(key)
-                if cur is None or seq > cur[0]:
-                    latest[key] = (seq, val)
+        entries = _read_leveldb(ldb_dir)
 
         groups: dict[str, dict] = {}
         tabs: dict[str, dict] = {}
 
-        for key, (_, val) in latest.items():
+        for entry in entries:
+            key = entry["key"]
             if not key.startswith(KEY_PREFIX):
                 continue
-            if val is None:
-                continue  # tombstone
+
+            val = bytes.fromhex(entry["val_hex"])
 
             wrapper = _wrapper_pb.LocalEntityWrapper()
             wrapper.ParseFromString(val)
@@ -93,7 +65,7 @@ class SavedTabGroups:
             spec.ParseFromString(wrapper.specifics)
 
             base = {
-                "guid": spec.guid,
+                "guid":          spec.guid,
                 "creation_time": spec.creation_time_windows_epoch_micros,
                 "update_time":   spec.update_time_windows_epoch_micros,
                 "version":       spec.version,
@@ -116,7 +88,6 @@ class SavedTabGroups:
                     "title":      t.title,
                     "position":   t.position,
                 }
-            # else: neither — skip
 
         return {"groups": groups, "tabs": tabs}
 
@@ -125,21 +96,17 @@ class SavedTabGroups:
     # ------------------------------------------------------------------ #
 
     def apply(self, profile_dir: Path, data: dict, backup_dir: Path) -> None:
-        """Replace the saved-tab-group entries in the live LevelDB with `data`.
+        """Replace saved-tab-group entries in the live LevelDB with `data`.
 
         Preconditions:
-          - Helium MUST not be running (it holds an exclusive flock on LOCK).
-          - `bin/leveldb-writer` must exist (built from bin/_go/leveldb_writer).
+          - Helium MUST not be running (it holds an exclusive lock on LOCK).
+          - bin/leveldb-writer[.exe] must exist (built from bin/_go/).
 
         Steps:
-          1. Snapshot the entire LevelDB directory to backup_dir/LevelDB/
-             (recoverable via cp -r if anything goes wrong).
-          2. Compute the diff: which `saved_tab_group-dt-*` keys to put,
-             which to delete (anything currently present that isn't in
-             `data`). Other keys (web_apps-*, metadata) are never touched.
-          3. Encode each group/tab as LocalEntityWrapper(specifics=
-             SavedTabGroupSpecifics(...)) protobuf bytes.
-          4. Invoke the Go writer with a JSON ops file.
+          1. Snapshot the entire LevelDB directory to backup_dir/LevelDB/.
+          2. Compute the diff: which keys to put, which to delete.
+          3. Encode each group/tab as LocalEntityWrapper(SavedTabGroupSpecifics).
+          4. Invoke the Go writer.
         """
         ldb_dir = self._leveldb_dir(profile_dir)
         if not ldb_dir.exists():
@@ -152,7 +119,7 @@ class SavedTabGroups:
             shutil.rmtree(backup_target)
         shutil.copytree(ldb_dir, backup_target)
 
-        # 2. Compute deletion set
+        # 2. Diff
         existing = self.extract(profile_dir)
         existing_keys = (
             {f"{KEY_PREFIX}{guid}" for guid in existing.get("groups", {})}
@@ -180,24 +147,18 @@ class SavedTabGroups:
             ops.append({"op": "delete", "key": key})
 
         # 3. Invoke Go writer
-        writer = Path(__file__).resolve().parent.parent / "leveldb-writer"
-        if not writer.exists():
-            raise FileNotFoundError(
-                f"leveldb-writer binary not found at {writer}. "
-                "Build it with: cd bin/_go/leveldb_writer && go build -o ../../leveldb-writer ."
-            )
-
+        tool = _go_tool()
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
             json.dump(ops, f)
             ops_path = f.name
         try:
             r = subprocess.run(
-                [str(writer), "-db", str(ldb_dir), "-ops", ops_path],
+                [str(tool), "write", "-db", str(ldb_dir), "-ops", ops_path],
                 check=False, capture_output=True, text=True,
             )
             if r.returncode != 0:
                 raise RuntimeError(
-                    f"leveldb-writer failed (exit {r.returncode}):\n"
+                    f"leveldb-writer write failed (exit {r.returncode}):\n"
                     f"stdout: {r.stdout}\nstderr: {r.stderr}"
                 )
         finally:
@@ -244,46 +205,35 @@ class SavedTabGroups:
 # Helpers
 # ---------------------------------------------------------------------------- #
 
-def _run_leveldbutil(path: Path) -> str:
+def _go_tool() -> Path:
+    name = "leveldb-writer.exe" if sys.platform == "win32" else "leveldb-writer"
+    tool = Path(__file__).resolve().parent.parent / name
+    if not tool.exists():
+        if sys.platform == "win32":
+            hint = r"Build it: run bin\_go\build.ps1 in PowerShell"
+        else:
+            hint = "Build it: bin/_go/build.sh"
+        raise FileNotFoundError(f"leveldb-writer not found at {tool}. {hint}")
+    return tool
+
+
+def _read_leveldb(ldb_dir: Path) -> list[dict]:
+    tool = _go_tool()
     r = subprocess.run(
-        ["leveldbutil", "dump", str(path)],
-        capture_output=True, text=True, check=True,
+        [str(tool), "read", "-db", str(ldb_dir)],
+        capture_output=True, text=True,
     )
-    return r.stdout
-
-
-def _parse_ldb(text: str):
-    """Yield (key, seq, val_bytes) tuples from a .ldb dump."""
-    for line in text.splitlines():
-        m = _LDB_LINE.match(line)
-        if m:
-            yield m["key"], int(m["seq"]), _unescape(m["val"])
-
-
-def _parse_log(text: str):
-    """Yield (key, seq, val_bytes_or_None) from a .log dump.
-    val=None marks a tombstone (delete).
-    """
-    seq = 0
-    for line in text.splitlines():
-        m = _LOG_HEADER.match(line)
-        if m:
-            seq = int(m["seq"])
-            continue
-        m = _LOG_PUT.match(line)
-        if m:
-            yield m["key"], seq, _unescape(m["val"])
-            seq += 1
-            continue
-        m = _LOG_DEL.match(line)
-        if m:
-            yield m["key"], seq, None
-            seq += 1
+    if r.returncode != 0:
+        err = (r.stderr or "").strip()
+        if "lock" in err.lower():
+            raise RuntimeError(
+                "LevelDB is locked — Helium must be closed before syncing saved tab groups"
+            )
+        raise RuntimeError(f"leveldb-writer read failed: {err}")
+    return json.loads(r.stdout)
 
 
 def _encode_group(g: dict) -> bytes:
-    """Encode a group dict back into a LocalEntityWrapper(SavedTabGroupSpecifics)
-    protobuf, ready to be stored as a LevelDB value."""
     spec = _stg_pb.SavedTabGroupSpecifics()
     spec.guid = g["guid"]
     spec.creation_time_windows_epoch_micros = int(g.get("creation_time", 0))
@@ -316,32 +266,3 @@ def _encode_tab(t: dict) -> bytes:
     wrapper.marker = 1
     wrapper.specifics = spec.SerializeToString()
     return wrapper.SerializeToString()
-
-
-def _unescape(s: str) -> bytes:
-    """Decode leveldbutil's escape output back to raw bytes.
-
-    leveldbutil's rule (see leveldb/util/logging.cc::AppendEscapedStringTo):
-    bytes 0x20–0x7E are emitted literally; all others as `\\xNN`. Notably,
-    a literal backslash byte (0x5C) is emitted as a single character `\\`,
-    NOT doubled. Python's `codecs.unicode_escape` would mis-interpret a
-    bare backslash followed by `x` plus other chars; we parse exactly
-    leveldbutil's grammar instead.
-    """
-    out = bytearray()
-    i = 0
-    n = len(s)
-    while i < n:
-        c = s[i]
-        if c == "\\" and i + 3 < n and s[i + 1] == "x":
-            hh = s[i + 2:i + 4]
-            try:
-                out.append(int(hh, 16))
-                i += 4
-                continue
-            except ValueError:
-                pass
-        # Any other character — including a bare backslash — is one literal byte.
-        out.append(ord(c) & 0xFF)
-        i += 1
-    return bytes(out)

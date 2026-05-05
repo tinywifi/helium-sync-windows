@@ -1,50 +1,54 @@
-# helium-sync
+# helium-sync (Windows)
 
-[![tests](https://github.com/aadarwal/helium-sync/actions/workflows/test.yml/badge.svg)](https://github.com/aadarwal/helium-sync/actions/workflows/test.yml)
-[![release](https://img.shields.io/github/v/release/aadarwal/helium-sync)](https://github.com/aadarwal/helium-sync/releases)
+[![tests](https://github.com/tinywifi/helium-sync-windows/actions/workflows/test.yml/badge.svg)](https://github.com/tinywifi/helium-sync-windows/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Bidirectional sync of [Helium browser](https://helium.computer) bookmarks + saved tab groups across Macs, using your own private git repo as the transport. CLI, no extension.
+**Windows fork of [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync)**, which was macOS-only. This fork ports the tool to Windows.
 
-A workaround until [imputnet/helium#90](https://github.com/imputnet/helium/issues/90) lands native sync.
+Bidirectional sync of [Helium browser](https://helium.computer) bookmarks + saved tab groups across Windows machines, using your own private git repo as the transport. CLI, no extension.
 
 ```
 helium-sync push     # done on this device  → git push
-helium-sync pull     # starting on this one  → git pull → write to live profile
+helium-sync pull     # starting on this one → git pull → write to live profile
 ```
 
-Two devices, one user, sequential. Last push wins.
+Two devices, one user, sequential. Last push wins. Close Helium before pull; push is safe while Helium runs.
 
 ## install
 
-```bash
-brew install aadarwal/tap/helium-sync
+### via Scoop (recommended)
+
+```powershell
+scoop bucket add tinywifi https://github.com/tinywifi/scoop-bucket
+scoop install helium-sync
 helium-sync setup
 ```
 
-`setup` is interactive. It asks where to put your private data repo (default `~/helium-data`), walks through adding a git remote (or skips it on the first device), writes `~/.config/helium-sync/config.toml`, and bootstraps from your live Helium state.
-
-On a second device, run the same two commands. `setup` detects the existing remote, branches automatically into the adopt flow, and prompts `y/N` before overwriting local state.
+Scoop handles the venv and `requirements.txt` automatically. No Go or manual PATH setup needed.
 
 ### from source
 
-If you'd rather not use brew (e.g. contributing):
-
-```bash
-brew install leveldb protobuf go
-git clone https://github.com/aadarwal/helium-sync ~/.local/share/helium-sync
-cd ~/.local/share/helium-sync
-python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
-ln -sf "$PWD/bin/helium-sync" /opt/homebrew/bin/helium-sync
-helium-sync setup
+```powershell
+git clone https://github.com/tinywifi/helium-sync-windows
+cd helium-sync-windows
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+bin\_go\build.ps1        # builds bin\leveldb-writer.exe — requires Go
+bin\helium-sync.bat setup
 ```
+
+### prerequisites (from source only)
+
+- Python 3.11+
+- [Go](https://go.dev/dl/) (only needed to build `leveldb-writer.exe`; pre-built `.exe` included in releases)
+- Git
 
 ## commands
 
 ```
 helium-sync setup     interactive first-time configuration
-helium-sync push      snapshot live → git push     (Helium can stay running)
-helium-sync pull      git pull → write to live     (Helium must be quit; Cmd-Q first)
+helium-sync push      snapshot live → git push     (Helium can stay open)
+helium-sync pull      git pull → write to live     (close Helium first)
 helium-sync status    diff live vs canonical
 helium-sync log       recent sync commits
 helium-sync gc        prune logs/ backups older than 30 days
@@ -52,28 +56,33 @@ helium-sync init      lower-level: bootstrap on the source-of-truth device
 helium-sync adopt     lower-level: bootstrap on a new device receiving canonical
 ```
 
-Discipline: pull at start of session, push at end. Backups under `logs/prePull.<ts>/` if you slip.
+Discipline: pull at start of session, push at end. Backups under `logs\prePull.<ts>\` if you slip.
 
 ## architecture
 
 Two targets, two formats, one transport.
 
-**Bookmarks** — `Default/Bookmarks` is JSON. Read it, zero `checksum`, write back atomically. That's the whole target.
+**Bookmarks** — `Default\Bookmarks` is JSON. Read it, zero `checksum`, write back atomically.
 
-**Saved tab groups** — protobuf entries keyed `saved_tab_group-dt-<UUID>` in a LevelDB at `Default/Sync Data/LevelDB/`. Read via `leveldbutil dump` over the SSTable files directly: no LevelDB lock contention, so `push` works while Helium runs. Write via a small Go binary (`bin/leveldb-writer`, ~80 lines using `syndtr/goleveldb`); `pull` requires Helium quit because LevelDB writes do need the lock.
+**Saved tab groups** — protobuf entries keyed `saved_tab_group-dt-<UUID>` in a LevelDB at `Default\Sync Data\LevelDB\`. Both read and write go through a small Go binary (`bin\leveldb-writer.exe`, ~100 lines using `syndtr/goleveldb`). Because the Go binary opens LevelDB normally (acquiring the lock), Helium must be closed for both push and pull.
 
-`plyvel` won't work — Apple Silicon Homebrew's `libleveldb.dylib` is built with `-fvisibility=hidden` (zero exported leveldb symbols, `dlopen` fails). The Go binary sidesteps the C++ library entirely.
-
-**Transport** — real git. `push` does `git add state/ && git commit && git push`. `pull` does `git pull --rebase`. State is plain JSON, so `git log` is your sync history and `git diff` is your bookmark diff. No three-way merge: for sequential single-user use, "last push wins" is simpler than reasoning about divergent histories.
+**Transport** — real git. `push` does `git add state\ && git commit && git push`. `pull` does `git pull --rebase`. State is plain JSON, so `git log` is your sync history and `git diff` is your bookmark diff. No three-way merge: "last push wins" is simpler than reasoning about divergent histories.
 
 ## what's not synced
 
-History, cookies, passwords, extensions, settings, themes, live open tabs. Privacy-sensitive, per-device-by-design, or wrong shape. Live tabs return per-device via Helium → Settings → On startup → *Continue where you left off*.
+History, cookies, passwords, extensions, settings, themes, live open tabs.
 
-## scope
+## differences from the macOS original
 
-macOS only (arm64 + Intel). One user, two devices, sequential. No Linux. No Windows. No browser extension. No auto-merge. See [CONTRIBUTING.md](CONTRIBUTING.md).
+| | [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync) | this fork |
+|---|---|---|
+| Platform | macOS (arm64 + Intel) | Windows |
+| Profile path | `~/Library/Application Support/net.imput.helium` | `%LOCALAPPDATA%\imput\Helium\User Data` |
+| Config path | `~/.config/helium-sync/config.toml` | `%APPDATA%\helium-sync\config.toml` |
+| LevelDB reads | `leveldbutil dump` (no lock, push with Helium open) | temp-copy trick (no lock, push with Helium open) |
+| Push while Helium open | yes | yes |
+| Install | `brew install aadarwal/tap/helium-sync` | clone + venv + build.ps1 |
 
 ---
 
-Built for personal use, MIT-licensed, shared because [imputnet/helium#90](https://github.com/imputnet/helium/issues/90) is taking a while. Issues and PRs welcome but slow.
+Fork of [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync), MIT-licensed.

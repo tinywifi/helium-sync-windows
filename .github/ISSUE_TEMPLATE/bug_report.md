@@ -8,7 +8,7 @@ labels: bug
 
 - helium-sync commit: <!-- `git -C path/to/helium-sync rev-parse --short HEAD` -->
 - Helium version: <!-- helium://version or "About Helium" -->
-- macOS version + arch: <!-- e.g. macOS 15.2 arm64 -->
+- Windows version: <!-- e.g. Windows 11 Pro 24H2 -->
 - Python: <!-- `python3 --version` (the one in your .venv) -->
 - Go: <!-- `go version`; only relevant if you rebuilt leveldb-writer -->
 

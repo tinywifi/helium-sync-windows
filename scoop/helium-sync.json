@@ -1,0 +1,37 @@
+{
+    "version": "0.1.0",
+    "description": "Bidirectional sync of Helium browser bookmarks + saved tab groups across Windows machines, using your own private git repo as the transport. CLI, no extension.",
+    "homepage": "https://github.com/tinywifi/helium-sync-windows",
+    "license": "MIT",
+    "suggest": {
+        "Python": ["python"]
+    },
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/tinywifi/helium-sync-windows/releases/download/v0.1.0/helium-sync-windows-v0.1.0-amd64.zip",
+            "hash": "sha256:PLACEHOLDER_AMD64"
+        },
+        "arm64": {
+            "url": "https://github.com/tinywifi/helium-sync-windows/releases/download/v0.1.0/helium-sync-windows-v0.1.0-arm64.zip",
+            "hash": "sha256:PLACEHOLDER_ARM64"
+        }
+    },
+    "post_install": [
+        "python -m venv \"$dir\\.venv\"",
+        "& \"$dir\\.venv\\Scripts\\pip\" install --quiet -r \"$dir\\requirements.txt\""
+    ],
+    "bin": [["bin\\helium-sync.bat", "helium-sync"]],
+    "checkver": {
+        "github": "https://github.com/tinywifi/helium-sync-windows"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/tinywifi/helium-sync-windows/releases/download/v$version/helium-sync-windows-v$version-amd64.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/tinywifi/helium-sync-windows/releases/download/v$version/helium-sync-windows-v$version-arm64.zip"
+            }
+        }
+    }
+}

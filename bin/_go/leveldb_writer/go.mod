@@ -1,4 +1,4 @@
-module github.com/aadarwal/helium-sync/leveldb_writer
+module github.com/tinywifi/helium-sync-windows/leveldb_writer
 
 go 1.26
 

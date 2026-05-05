@@ -8,3 +8,6 @@ logs/
 __pycache__/
 .DS_Store
 .venv/
+*.exe
+dist/
+staging/
