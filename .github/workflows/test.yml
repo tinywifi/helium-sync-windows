@@ -66,6 +66,22 @@ jobs:
             throw "Scoop manifest contains placeholder SHA values"
           }
 
+      - name: validate Scoop checkver and autoupdate
+        shell: pwsh
+        run: |
+          $manifest = Get-Content "scoop\helium-sync.json" -Raw | ConvertFrom-Json
+          if ($manifest.checkver.github -ne "https://github.com/tinywifi/helium-sync-windows") {
+            throw "Scoop checkver GitHub URL is wrong"
+          }
+          $amd = $manifest.autoupdate.architecture."64bit".url
+          $arm = $manifest.autoupdate.architecture.arm64.url
+          if ($amd -ne "https://github.com/tinywifi/helium-sync-windows/releases/download/v`$version/helium-sync-windows-v`$version-amd64.zip") {
+            throw "Scoop amd64 autoupdate URL is wrong"
+          }
+          if ($arm -ne "https://github.com/tinywifi/helium-sync-windows/releases/download/v`$version/helium-sync-windows-v`$version-arm64.zip") {
+            throw "Scoop arm64 autoupdate URL is wrong"
+          }
+
       - name: run tests
         run: .venv\Scripts\python -m unittest discover tests/ -v
 
