@@ -8,6 +8,7 @@ Usage:
                            (close Helium first)
   helium-sync pull         origin -> repo -> this device's live profile
                            (close Helium first)
+  helium-sync doctor       Check local install and sync prerequisites
   helium-sync init         First-time: declare this device the source of truth
   helium-sync adopt        First-time on a new device: receive canonical state
 
@@ -138,6 +139,19 @@ def _has_remote() -> bool:
     """True if an 'origin' remote is configured (even without a tracking branch)."""
     r = run_git(["remote", "get-url", "origin"], check=False)
     return r.returncode == 0
+
+
+def _git_available() -> bool:
+    return shutil.which("git") is not None
+
+
+def _leveldb_writer_path() -> Path:
+    return SCRIPT_DIR / ("leveldb-writer.exe" if os.name == "nt" else "leveldb-writer")
+
+
+def _is_scoop_install() -> bool:
+    parts = [part.lower() for part in _repo.parts]
+    return "scoop" in parts and "apps" in parts and "helium-sync" in parts
 
 
 def log(msg: str) -> None:
@@ -317,6 +331,93 @@ def cmd_status(args) -> int:
             diff = _format_diff(target, live, canonical)
             print(f"  {target.name:<18} live={live_summary} | canonical={canon_summary} | {diff}")
 
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    failures = 0
+    warnings = 0
+
+    def report(level: str, name: str, detail: str) -> None:
+        nonlocal failures, warnings
+        if level == "fail":
+            failures += 1
+        elif level == "warn":
+            warnings += 1
+        print(f"[{level}] {name:<20} {detail}")
+
+    print("helium-sync doctor")
+    print()
+
+    if _git_available():
+        git_version = subprocess.run(["git", "--version"], capture_output=True, text=True, check=False)
+        report("ok", "git", (git_version.stdout or "available").strip())
+    else:
+        report("fail", "git", "git was not found on PATH")
+
+    if _venv_py.exists():
+        report("ok", "python venv", str(_venv_py))
+    else:
+        report("warn", "python venv", f"not found at {_venv_py}")
+
+    tool = _leveldb_writer_path()
+    if tool.exists():
+        report("ok", "leveldb-writer", str(tool))
+    else:
+        report("fail", "leveldb-writer", f"not found at {tool}")
+
+    profile = Path(args.profile)
+    if profile.exists():
+        report("ok", "profile", str(profile))
+        default_dir = profile / "Default"
+        if default_dir.exists():
+            report("ok", "profile Default", str(default_dir))
+        else:
+            report("warn", "profile Default", f"not found at {default_dir}")
+    else:
+        report("fail", "profile", f"not found at {profile}")
+
+    if DEFAULT_CONFIG.exists():
+        try:
+            cfg = tomllib.loads(DEFAULT_CONFIG.read_text())
+            cfg_repo = cfg.get("repo")
+            if cfg_repo:
+                report("ok", "config", f"{DEFAULT_CONFIG} -> {cfg_repo}")
+            else:
+                report("warn", "config", f"{DEFAULT_CONFIG} has no repo value")
+        except (tomllib.TOMLDecodeError, OSError) as e:
+            report("fail", "config", f"cannot read {DEFAULT_CONFIG}: {e}")
+    else:
+        report("warn", "config", f"not found at {DEFAULT_CONFIG}")
+
+    if REPO_ROOT.exists():
+        report("ok", "repo", str(REPO_ROOT))
+        if (REPO_ROOT / ".git").exists():
+            report("ok", "repo git", ".git exists")
+            remote = run_git(["remote", "get-url", "origin"], check=False)
+            if remote.returncode == 0 and remote.stdout.strip():
+                report("ok", "remote", remote.stdout.strip())
+            else:
+                report("warn", "remote", "origin is not configured")
+        else:
+            report("fail", "repo git", f"{REPO_ROOT} is not a git repo")
+    else:
+        report("fail", "repo", f"not found at {REPO_ROOT}")
+
+    if _is_scoop_install():
+        report("ok", "scoop", str(_repo))
+    else:
+        shim = shutil.which("helium-sync")
+        if shim:
+            report("warn", "scoop", f"shim found at {shim}, install root is {_repo}")
+        else:
+            report("warn", "scoop", "not detected")
+
+    print()
+    if failures:
+        print(f"doctor found {failures} failure(s) and {warnings} warning(s)")
+        return 1
+    print(f"doctor found 0 failures and {warnings} warning(s)")
     return 0
 
 
@@ -607,6 +708,8 @@ def main() -> int:
 
     sub.add_parser("status", help="show what's going on (read-only)")
 
+    sub.add_parser("doctor", help="check local install and sync prerequisites")
+
     sub.add_parser("push", help="snapshot -> repo -> origin (close Helium first)")
 
     p_pull = sub.add_parser("pull", help="origin -> repo -> live profile")
@@ -643,6 +746,7 @@ def main() -> int:
     handler = {
         "setup":  cmd_setup,
         "status": cmd_status,
+        "doctor": cmd_doctor,
         "push":   cmd_push,
         "pull":   cmd_pull,
         "init":   cmd_init,
