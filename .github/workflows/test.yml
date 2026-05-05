@@ -10,9 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────
-  # Windows: build the Go binary and run all tests.
-  # ──────────────────────────────────────────────────────────────────────
   windows:
     name: build leveldb-writer + tests (Windows)
     runs-on: windows-latest
@@ -27,18 +24,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+          cache-dependency-path: bin/_go/leveldb_writer/go.sum
 
       - name: install python deps
         run: |
           python -m venv .venv
-          .venv\Scripts\pip install --upgrade pip
-          .venv\Scripts\pip install -r requirements.txt
+          .venv\Scripts\python -m pip install --upgrade pip
+          .venv\Scripts\python -m pip install -r requirements.txt
 
       - name: build leveldb-writer.exe
         run: |
           cd bin\_go\leveldb_writer
           go build -trimpath -ldflags="-s -w" -o ..\..\leveldb-writer.exe .
-          ..\leveldb-writer.exe 2>&1; $true   # prints usage; non-zero exit is fine
+          ..\..\leveldb-writer.exe read -h
 
       - name: run tests
         run: .venv\Scripts\python -m unittest discover tests/ -v
