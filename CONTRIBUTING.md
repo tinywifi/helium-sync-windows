@@ -1,47 +1,47 @@
 # Contributing
 
-## Scope
+`main` is the Go port. The pre-port Python implementation is preserved on the `original` branch.
 
-This is the Windows fork of [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync). In scope:
+## Setup
 
-- Bug fixes for Helium on Windows
-- Improvements to the Bookmarks and SavedTabGroups sync targets
-- New optional sync targets that conform to the `Target` protocol in `bin/targets/__init__.py`
-- Tests, CI, docs, build tooling
-
-Out of scope:
-
-- macOS or Linux support (use the [original](https://github.com/aadarwal/helium-sync))
-- Bidirectional automatic merge (push-overwrites-canonical is intentional)
-- Browser-extension form factor
-- History/cookies/passwords/extensions sync
-
-## Dev setup
-
-```
-git clone https://github.com/tinywifi/helium-sync-windows
-cd helium-sync-windows
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-bin\_go\build.ps1
-.venv\Scripts\python -m unittest discover tests/
+```powershell
+go test ./...
+.\scripts\build.ps1
+bin\helium-sync.bat doctor
 ```
 
-## Tests
+## Layout
 
-Pure-Python tests run on every CI push and PR. Real-Helium tests (`TestRealHelium`, `TestApply`) auto-skip when no Helium profile is present. Override the path with `HELIUM_PROFILE=...` if your install is non-standard.
+- `cmd/helium-sync/`: CLI flag parsing and command dispatch.
+- `internal/heliumsync/app.go`: application state and target registry helpers.
+- `internal/heliumsync/config.go`: config, defaults, path resolution, timestamps.
+- `internal/heliumsync/git.go`: git wrapper helpers.
+- `internal/heliumsync/sync_workflow.go`: `push`, `pull`, and dry-run flows.
+- `internal/heliumsync/status_diff.go`: `status`, `diff`, and bookmark diff formatting.
+- `internal/heliumsync/export_import.go`: portable JSON export/import.
+- `internal/heliumsync/maintenance.go`: `doctor`, `version`, `log`, `gc`, `init`, `adopt`, `restore`.
+- `internal/heliumsync/setup_completion.go`: first-run setup and shell completion output.
+- `internal/heliumsync/resolve.go`: Bubble Tea resolver UI.
+- `internal/heliumsync/bookmarks.go`: bookmarks target.
+- `internal/heliumsync/bookmark_tree.go`: bookmark tree walking and semantic comparison helpers.
+- `internal/heliumsync/saved_tab_groups.go`: saved tab groups target.
+- `internal/heliumsync/leveldb.go`: LevelDB copy/read support.
+- `internal/heliumsync/protowire_saved_tab_groups.go`: protobuf wire encode/decode.
+- `internal/heliumsync/validation.go`: target validation.
+- `internal/heliumsync/json_helpers.go` and `fileutil.go`: small shared helpers.
 
-## Architecture
+## Testing
 
-- `bin\helium-sync` — CLI entry point. Auto-relaunches under `.venv\Scripts\python.exe`.
-- `bin\targets\__init__.py` — `Target` protocol. New sync targets conform to this and register in `ALL_TARGETS`.
-- `bin\targets\bookmarks.py` — JSON file I/O.
-- `bin\targets\saved_tab_groups.py` — protobuf decode/encode + LevelDB read/write via `bin\leveldb-writer.exe`.
-- `bin\_go\leveldb_writer\main.go` — Go binary: `read` dumps DB to JSON, `write` applies a batch of ops.
-- `proto\` — vendored Chromium proto schemas.
+Run the Go tests before submitting changes:
 
-## PR conventions
+```powershell
+go test ./...
+```
 
-- One concept per PR.
-- All CI checks must be green before merge.
-- Squash on merge.
+For local command testing:
+
+```powershell
+go run ./cmd/helium-sync --repo <repo> --profile <profile> status
+```
+
+Keep behavior changes covered by focused Go tests in `internal/heliumsync`.

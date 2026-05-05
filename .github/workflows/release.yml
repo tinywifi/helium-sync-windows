@@ -1,87 +1,67 @@
 name: release
 
-# Triggered when a `v*` tag is pushed (e.g., `v0.1.0`).
-# Produces:
-#   leveldb-writer-windows-amd64.exe - standalone binary (amd64)
-#   leveldb-writer-windows-arm64.exe - standalone binary (arm64)
-#   helium-sync-windows-{tag}-amd64.zip - Scoop / manual install (amd64)
-#   helium-sync-windows-{tag}-arm64.zip - Scoop / manual install (arm64)
-
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: build + publish release
+    name: build, publish, update Scoop
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
-          cache-dependency-path: bin/_go/leveldb_writer/go.sum
+          go-version: "1.26.x"
+          cache-dependency-path: go.sum
 
-      - name: build leveldb-writer for amd64 and arm64
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Set-Location bin\_go\leveldb_writer
-          $env:GOOS = "windows"
-          $env:GOARCH = "amd64"
-          go build -trimpath -ldflags="-s -w" `
-            -o ..\..\..\dist\leveldb-writer-windows-amd64.exe .
-          $env:GOARCH = "arm64"
-          go build -trimpath -ldflags="-s -w" `
-            -o ..\..\..\dist\leveldb-writer-windows-arm64.exe .
+      - name: test
+        run: go test ./...
 
-      - name: create release ZIPs for Scoop
+      - name: create release ZIPs
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
 
           foreach ($arch in @("amd64", "arm64")) {
             $stage = "staging\$arch"
-            New-Item -ItemType Directory -Force "$stage\bin\targets\_proto" | Out-Null
+            New-Item -ItemType Directory -Force "$stage\bin" | Out-Null
 
-            # Python sources
-            Copy-Item bin\helium-sync        "$stage\bin\helium-sync"
-            Copy-Item bin\helium-sync.bat    "$stage\bin\helium-sync.bat"
-            Copy-Item bin\targets\__init__.py      "$stage\bin\targets\__init__.py"
-            Copy-Item bin\targets\bookmarks.py     "$stage\bin\targets\bookmarks.py"
-            Copy-Item bin\targets\saved_tab_groups.py "$stage\bin\targets\saved_tab_groups.py"
-            Copy-Item bin\targets\_proto\local_entity_wrapper_pb2.py `
-                      "$stage\bin\targets\_proto\local_entity_wrapper_pb2.py"
-            Copy-Item bin\targets\_proto\saved_tab_group_specifics_pb2.py `
-                      "$stage\bin\targets\_proto\saved_tab_group_specifics_pb2.py"
-            Copy-Item bin\targets\_proto\tab_group_attribution_metadata_pb2.py `
-                      "$stage\bin\targets\_proto\tab_group_attribution_metadata_pb2.py"
-            Copy-Item requirements.txt "$stage\requirements.txt"
+            $env:GOOS = "windows"
+            $env:GOARCH = $arch
+            $env:CGO_ENABLED = "0"
+            go build -trimpath -ldflags="-s -w" -o "$stage\bin\helium-sync.exe" ./cmd/helium-sync
 
-            # Pre-built binary for this arch
-            Copy-Item "dist\leveldb-writer-windows-$arch.exe" `
-                      "$stage\bin\leveldb-writer.exe"
+            Copy-Item bin\helium-sync.bat "$stage\bin\helium-sync.bat"
+            Copy-Item README.md "$stage\README.md"
+            Copy-Item LICENSE "$stage\LICENSE"
 
-            # ZIP it
-            Compress-Archive -Path "$stage\*" `
-              -DestinationPath "dist\helium-sync-windows-$tag-$arch.zip"
+            Compress-Archive -Path "$stage\*" -DestinationPath "dist\helium-sync-windows-$tag-$arch.zip"
           }
 
       - name: verify artifacts
         shell: pwsh
-        run: Get-ChildItem dist\
+        run: |
+          Get-ChildItem dist\
+          foreach ($arch in @("amd64", "arm64")) {
+            $path = "dist\helium-sync-windows-${{ github.ref_name }}-$arch.zip"
+            if (-not (Test-Path $path)) {
+              throw "Missing artifact: $path"
+            }
+          }
 
       - name: prepare release notes
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
-
-          # Find the previous tag (if any)
           $allTags = git tag --sort=-v:refname
           $prevTag = ""
           for ($i = 0; $i -lt $allTags.Count; $i++) {
@@ -90,20 +70,11 @@ jobs:
               break
             }
           }
-
-          # Get commits since previous tag (or all if first release)
-          if ($prevTag) {
-            $logRange = "$prevTag..HEAD"
-          } else {
-            $logRange = "HEAD"
-          }
+          if ($prevTag) { $logRange = "$prevTag..HEAD" } else { $logRange = "HEAD" }
           $commits = git log $logRange --oneline --no-merges
 
-          # Generate highlights from conventional commits
           $highlights = @()
-          # Verbs to strip from commit subject to avoid "Added add ..." redundancy
           $stripVerbs = '^(add|adds|added|fix|fixes|fixed|update|updates|updated|implement|implements|implemented|refactor|refactors|refactored|remove|removes|removed|improve|improves|improved|introduce|introduced|create|creates|created)\s+'
-
           $featCommits = $commits | Where-Object { $_ -match "^[\da-f]+ feat(\(.+\))?:\s*(.+)" }
           $fixCommits = $commits | Where-Object { $_ -match "^[\da-f]+ fix(\(.+\))?:\s*(.+)" }
           $docsCommits = $commits | Where-Object { $_ -match "^[\da-f]+ docs(\(.+\))?:\s*(.+)" }
@@ -113,21 +84,21 @@ jobs:
             $highlights += ($featCommits | ForEach-Object {
               $msg = ($_ -replace "^[\da-f]+\s+(feat(\(.+\))?:\s*)", "").Trim()
               $msg = ($msg -replace $stripVerbs, "").Trim()
-              if ($msg) { "- Added $msg" } else { "- Added $($_ -replace '^[\da-f]+\s+feat(\(.+\))?:\s*', '').Trim()" }
+              "- Added $msg"
             }) -join "`n"
           }
           if ($fixCommits.Count -gt 0) {
             $highlights += ($fixCommits | ForEach-Object {
               $msg = ($_ -replace "^[\da-f]+\s+(fix(\(.+\))?:\s*)", "").Trim()
               $msg = ($msg -replace $stripVerbs, "").Trim()
-              if ($msg) { "- Fixed $msg" } else { "- Fixed $($_ -replace '^[\da-f]+\s+fix(\(.+\))?:\s*', '').Trim()" }
+              "- Fixed $msg"
             }) -join "`n"
           }
           if ($docsCommits.Count -gt 0) {
             $highlights += ($docsCommits | ForEach-Object {
               $msg = ($_ -replace "^[\da-f]+\s+(docs(\(.+\))?:\s*)", "").Trim()
               $msg = ($msg -replace $stripVerbs, "").Trim()
-              if ($msg) { "- Updated $msg" } else { "- Updated $($_ -replace '^[\da-f]+\s+docs(\(.+\))?:\s*', '').Trim()" }
+              "- Updated $msg"
             }) -join "`n"
           }
           if ($otherCommits.Count -gt 0) {
@@ -137,24 +108,21 @@ jobs:
             }) -join "`n"
           }
 
-          # Generate "should you update" summary
-          $commitCount = $commits.Count
           if ($featCommits.Count -gt 0 -and $fixCommits.Count -gt 0) {
             $shouldUpdate = "Yes. This release adds new features and fixes."
           } elseif ($featCommits.Count -gt 0) {
             $shouldUpdate = "Yes. This release adds new features."
           } elseif ($fixCommits.Count -gt 0) {
             $shouldUpdate = "Yes. This release contains important fixes."
-          } elseif ($commitCount -gt 0) {
-            $shouldUpdate = "Recommended. Contains $commitCount change(s)."
+          } elseif ($commits.Count -gt 0) {
+            $shouldUpdate = "Recommended. Contains $($commits.Count) change(s)."
           } else {
-            $shouldUpdate = "Minor release — review the changes below."
+            $shouldUpdate = "Minor release - review the changes below."
           }
 
-          # Substitute placeholders
           $template = Get-Content ".github\release-notes-template.md" -Raw
           $notes = $template.Replace("{{TAG}}", $tag).Replace("{{SHOULD_UPDATE}}", $shouldUpdate)
-          if ($highlights -join "" -eq "") {
+          if (($highlights -join "") -eq "") {
             $notes = $notes.Replace("{{HIGHLIGHTS}}", "No user-facing changes.")
           } else {
             $notes = $notes.Replace("{{HIGHLIGHTS}}", ($highlights -join "`n"))
@@ -165,8 +133,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/leveldb-writer-windows-amd64.exe
-            dist/leveldb-writer-windows-arm64.exe
             dist/helium-sync-windows-*-amd64.zip
             dist/helium-sync-windows-*-arm64.zip
           body_path: dist/release-notes.md
@@ -204,5 +170,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add bucket/helium-sync.json
-          git commit -m "helium-sync $tag"
-          git push origin HEAD:main
+          if (git diff --cached --quiet) {
+            Write-Host "Scoop manifest already up to date"
+          } else {
+            git commit -m "helium-sync $tag"
+            git push origin HEAD:main
+          }

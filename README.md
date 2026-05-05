@@ -1,138 +1,101 @@
 # helium-sync (Windows)
 
-[![tests](https://github.com/tinywifi/helium-sync-windows/actions/workflows/test.yml/badge.svg)](https://github.com/tinywifi/helium-sync-windows/actions/workflows/test.yml)
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
-**Windows fork of [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync)**, which was macOS-only. This fork ports the tool to Windows.
-
-Bidirectional sync of [Helium browser](https://helium.computer) bookmarks + saved tab groups across Windows machines, using your own private git repo as the transport. CLI, no extension.
-
-```
-helium-sync push     # done on this device  → git push
-helium-sync pull     # starting on this one → git pull → write to live profile
-```
-
-Two devices, one user, sequential. Last push wins. Close Helium before pull; push is safe while Helium runs.
-
-## install
-
-### via Scoop (recommended)
+Bidirectional sync of Helium browser bookmarks and saved tab groups across Windows machines, using your own private git repo as the transport.
 
 ```powershell
-scoop bucket add tinywifi https://github.com/tinywifi/scoop-bucket
-scoop install helium-sync
-helium-sync setup
+helium-sync push     # snapshot live profile -> git repo -> origin
+helium-sync pull     # git pull -> write canonical state to live profile
 ```
 
-Scoop handles the venv and `requirements.txt` automatically. No Go or manual PATH setup needed.
+Two devices, one user, sequential. Last push wins. Close Helium before `pull`; `push` can read bookmarks while Helium is running.
 
-### from source
+## Install From Source
 
 ```powershell
 git clone https://github.com/tinywifi/helium-sync-windows
 cd helium-sync-windows
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-bin\_go\build.ps1        # builds bin\leveldb-writer.exe — requires Go
+go test ./...
+.\scripts\build.ps1
 bin\helium-sync.bat setup
 ```
 
-### prerequisites (from source only)
+Prerequisites:
 
-- Python 3.11+
-- [Go](https://go.dev/dl/) (only needed to build `leveldb-writer.exe`; pre-built `.exe` included in releases)
+- Go 1.23+
 - Git
 
-## commands
+## Commands
 
-### core workflow
+Core workflow:
 
-```
-helium-sync setup     interactive first-time configuration
-helium-sync push      snapshot live → git push     (Helium can stay open)
-helium-sync pull      git pull → write to live     (close Helium first)
-```
-
-### inspect & debug
-
-```
-helium-sync status    diff live vs canonical state
-helium-sync diff      human-readable diff of bookmarks (live ≠ canonical)
-helium-sync doctor    check git, Python venv, profile, repo, remote, Scoop
-helium-sync version   print version, git revision, Python runtime
-helium-sync log -n 20 show recent sync commits (default: 10)
+```powershell
+helium-sync setup
+helium-sync push
+helium-sync pull
 ```
 
-### portable backup
+Inspect and debug:
 
-```
-helium-sync export [--output path.json] [--target bookmarks]
-helium-sync import file.json [--target bookmarks] [--allow-helium-running]
-```
-
-### maintenance
-
-```
-helium-sync init      lower-level: bootstrap on the source-of-truth device (--force, --target)
-helium-sync adopt     lower-level: bootstrap on a new device receiving canonical
-helium-sync gc        prune logs/ backups older than 30 days (--keep-days, --dry-run)
+```powershell
+helium-sync status
+helium-sync diff
+helium-sync doctor
+helium-sync version
+helium-sync log -n 20
 ```
 
-### safety & recovery
+Portable backup:
 
-```
-helium-sync push --dry-run    show what would change without committing or pushing
-helium-sync pull --dry-run    show what would change without pulling or writing
-helium-sync restore           restore profile from latest backup (prePull/preImport/preSync)
-helium-sync resolve           interactively merge divergent bookmark states (--theirs file.json)
+```powershell
+helium-sync export --output backup.json
+helium-sync import backup.json --allow-helium-running
 ```
 
-### shell completion
+Maintenance and recovery:
 
+```powershell
+helium-sync init --force
+helium-sync adopt --yes
+helium-sync push --dry-run
+helium-sync pull --dry-run
+helium-sync restore
+helium-sync resolve --target bookmarks
+helium-sync gc --keep-days 30
 ```
-helium-sync completion --shell powershell    generate PowerShell tab completion
-helium-sync completion --shell cmd           generate DOSKEY macros for cmd.exe
-```
 
-### shared flags
+Shared flags:
 
-`--target <name>` — limit push, pull, status, diff, export, or import to one target
-(e.g. `--target bookmarks`). Useful when only bookmarks changed.
+- `--profile <path>`: Helium profile directory.
+- `--repo <path>`: private data repo path.
+- `--target <bookmarks|saved_tab_groups>`: limit commands to one target.
+- `--strict`: fail `push` on validation warnings.
+- `--allow-helium-running`: bypass write guard for tests.
 
-`--strict` — used with `push`. Fails the push if any validation finds empty URLs,
-invalid schemes, broken folder hierarchies, or tab group issues. Without it, push
-warns but still proceeds.
+## Architecture
 
-`--allow-helium-running` — bypass the running-browser guard on import and pull.
-**Dangerous** — can corrupt LevelDB. Only use for testing.
+The project is now a Go CLI.
 
-Discipline: pull at start of session, push at end. Backups under `logs\prePull.<ts>\` if you slip.
+- `cmd/helium-sync`: command-line flag parsing and dispatch.
+- `internal/heliumsync`: sync workflows, targets, import/export, restore, resolver TUI, and utilities.
+- `internal/heliumsync/bookmarks.go`: Chromium bookmark JSON handling.
+- `internal/heliumsync/saved_tab_groups.go`: saved tab group state handling.
+- `internal/heliumsync/leveldb.go`: LevelDB read/write support via `syndtr/goleveldb`.
+- `internal/heliumsync/protowire_saved_tab_groups.go`: direct protobuf wire encode/decode for Chromium saved tab group specifics.
 
-## architecture
+Charm libraries are used throughout the Go port:
 
-Two targets, two formats, one transport.
+- Bubble Tea, Bubble Tree, and Bubbles for the interactive resolver UI.
+- Huh for setup/adopt prompts.
+- Lip Gloss for terminal styling.
+- Log for structured internal logging.
+- Harmonica for resolver animation state.
 
-**Bookmarks** — `Default\Bookmarks` is JSON. Read it, zero `checksum`, write back atomically.
+## Synced Data
 
-**Saved tab groups** — protobuf entries keyed `saved_tab_group-dt-<UUID>` in a LevelDB at `Default\Sync Data\LevelDB\`. Both read and write go through a small Go binary (`bin\leveldb-writer.exe`, ~100 lines using `syndtr/goleveldb`). Because the Go binary opens LevelDB normally (acquiring the lock), Helium must be closed for both push and pull.
+Bookmarks are stored in `Default\Bookmarks` as JSON. The checksum is cleared during extraction so Chromium can recompute it per device.
 
-**Transport** — real git. `push` does `git add state\ && git commit && git push`. `pull` does `git pull --rebase`. State is plain JSON, so `git log` is your sync history and `git diff` is your bookmark diff. No three-way merge: "last push wins" is simpler than reasoning about divergent histories.
+Saved tab groups are protobuf values in `Default\Sync Data\LevelDB\` under keys like `saved_tab_group-dt-<UUID>`. The Go port reads LevelDB through a temporary copy for safe extraction and writes through LevelDB batches when applying canonical state.
 
-## what's not synced
+## Not Synced
 
-History, cookies, passwords, extensions, settings, themes, live open tabs.
-
-## differences from the macOS original
-
-| | [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync) | this fork |
-|---|---|---|
-| Platform | macOS (arm64 + Intel) | Windows |
-| Profile path | `~/Library/Application Support/net.imput.helium` | `%LOCALAPPDATA%\imput\Helium\User Data` |
-| Config path | `~/.config/helium-sync/config.toml` | `%APPDATA%\helium-sync\config.toml` |
-| LevelDB reads | `leveldbutil dump` (no lock, push with Helium open) | temp-copy trick (no lock, push with Helium open) |
-| Push while Helium open | yes | yes |
-| Install | `brew install aadarwal/tap/helium-sync` | clone + venv + build.ps1 |
-
----
-
-Fork of [aadarwal/helium-sync](https://github.com/aadarwal/helium-sync), MIT-licensed.
+History, cookies, passwords, extensions, settings, themes, and live open tabs.

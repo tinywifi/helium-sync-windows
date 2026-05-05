@@ -1,14 +1,5 @@
 version: 2
 updates:
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-    open-pull-requests-limit: 3
-    labels:
-      - "dependencies"
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -19,7 +10,7 @@ updates:
       - "ci"
 
   - package-ecosystem: "gomod"
-    directory: "/bin/_go/leveldb_writer"
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
