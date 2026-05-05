@@ -128,7 +128,6 @@ jobs:
             Copy-Item bin\targets\_proto\tab_group_attribution_metadata_pb2.py `
               "$stage\bin\targets\_proto\tab_group_attribution_metadata_pb2.py"
             Copy-Item requirements.txt "$stage\requirements.txt"
-            Copy-Item VERSION "$stage\VERSION"
             Copy-Item "dist\leveldb-writer-windows-$arch.exe" "$stage\bin\leveldb-writer.exe"
 
             Compress-Archive -Path "$stage\*" `

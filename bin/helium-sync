@@ -156,11 +156,18 @@ def _is_scoop_install() -> bool:
 
 
 def _app_version() -> str:
-    version_file = _repo / "VERSION"
-    if version_file.exists():
-        text = version_file.read_text().strip()
-        if text:
-            return text
+    env_version = os.environ.get("HELIUM_SYNC_VERSION")
+    if env_version:
+        return env_version
+    if _repo.name == "current":
+        parent_version = _repo.parent.name
+        if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", parent_version):
+            return parent_version
+    if re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", _repo.name):
+        return _repo.name
+    revision = _git_revision()
+    if revision.startswith("v"):
+        return revision[1:]
     return "unknown"
 
 

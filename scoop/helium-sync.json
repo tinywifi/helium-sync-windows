@@ -17,10 +17,13 @@
         }
     },
     "post_install": [
-        "$install_dir = Join-Path $appdir $version",
+        "$install_dir = Join-Path (Split-Path $dir) $version",
         "python -m venv \"$install_dir\\.venv\"",
         "& \"$install_dir\\.venv\\Scripts\\python\" -m pip install --quiet -r \"$install_dir\\requirements.txt\""
     ],
+    "env_set": {
+        "HELIUM_SYNC_VERSION": "$version"
+    },
     "notes": [
         "helium-sync stores user config outside the Scoop app directory at %APPDATA%\\helium-sync\\config.toml.",
         "Your sync data repo is not removed by Scoop uninstall. Check `helium-sync doctor` or the config file for its path.",
