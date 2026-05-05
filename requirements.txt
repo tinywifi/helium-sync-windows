@@ -16,4 +16,4 @@
 # from proto/*.proto via proto/compile.sh (development only; pre-built files are
 # included in the repo).
 
-protobuf>=4.21
+protobuf>=7.34.1
