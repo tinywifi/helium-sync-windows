@@ -45,16 +45,50 @@ bin\helium-sync.bat setup
 
 ## commands
 
+### core workflow
+
 ```
 helium-sync setup     interactive first-time configuration
 helium-sync push      snapshot live → git push     (Helium can stay open)
 helium-sync pull      git pull → write to live     (close Helium first)
-helium-sync status    diff live vs canonical
-helium-sync log       recent sync commits
-helium-sync gc        prune logs/ backups older than 30 days
+```
+
+### inspect & debug
+
+```
+helium-sync status    diff live vs canonical state
+helium-sync diff      human-readable diff of bookmarks (live ≠ canonical)
+helium-sync doctor    check git, Python venv, profile, repo, remote, Scoop
+helium-sync version   print version, git revision, Python runtime
+helium-sync log -n 20 show recent sync commits (default: 10)
+```
+
+### portable backup
+
+```
+helium-sync export [--output path.json] [--target bookmarks]
+helium-sync import file.json [--target bookmarks] [--allow-helium-running]
+```
+
+### maintenance
+
+```
 helium-sync init      lower-level: bootstrap on the source-of-truth device
 helium-sync adopt     lower-level: bootstrap on a new device receiving canonical
+helium-sync gc        prune logs/ backups older than 30 days (--keep-days, --dry-run)
 ```
+
+### shared flags
+
+`--target <name>` — limit push, pull, status, diff, export, or import to one target
+(e.g. `--target bookmarks`). Useful when only bookmarks changed.
+
+`--strict` — used with `push`. Fails the push if any validation finds empty URLs,
+invalid schemes, broken folder hierarchies, or tab group issues. Without it, push
+warns but still proceeds.
+
+`--allow-helium-running` — bypass the running-browser guard on import and pull.
+**Dangerous** — can corrupt LevelDB. Only use for testing.
 
 Discipline: pull at start of session, push at end. Backups under `logs\prePull.<ts>\` if you slip.
 
