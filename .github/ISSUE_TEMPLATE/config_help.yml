@@ -1,6 +1,8 @@
 name: Setup / config help
 description: Stuck on first-time setup, repo configuration, or sync
-labels: [question]
+title: "[Help]: "
+labels:
+  - question
 body:
   - type: textarea
     id: version
