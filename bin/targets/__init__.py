@@ -45,9 +45,9 @@ All commands auto-relaunch under .venv/Scripts/python.exe if not already.
 
 ### Safety & recovery
   restore        — restore profile from latest logs/prePull or preImport or preSync backup
-  resolve        — interactive TUI to merge divergent bookmark states (--theirs)
+  resolve        — interactive TUI to merge divergent states (--target bookmarks|saved_tab_groups, --theirs)
                    ↑↓ navigate, Space toggle, Enter apply, Q cancel.
-                   Handles local-only, remote-only, and name conflicts.
+                   Handles local-only, remote-only, and name/title conflicts.
 
 ### Shell completion
   completion     — generate PowerShell or cmd.exe completion scripts (--shell powershell|cmd)

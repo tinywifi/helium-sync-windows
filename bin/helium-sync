@@ -48,6 +48,7 @@ import subprocess
 import tomllib
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from typing import Any, Iterator, Optional
 
 sys.path.insert(0, str(_self.parent))
 from targets import ALL_TARGETS  # noqa: E402
@@ -277,7 +278,7 @@ def _validate_bookmarks(data: dict) -> list[str]:
     return issues
 
 
-def _walk_all_nodes(node: dict):
+def _walk_all_nodes(node: dict) -> Iterator[dict]:
     """Yield every node in the bookmark tree (URLs and folders)."""
     yield node
     for c in node.get("children") or []:
@@ -307,11 +308,112 @@ def _validate_tab_groups(data: dict) -> list[str]:
     return issues
 
 
+def _tab_group_divergences(live: dict, canonical: dict) -> dict:
+    """Classify divergences between two saved-tab-group states.
+
+    Returns a dict with six sets of GUIDs:
+      live_only_groups / canon_only_groups / conflict_groups
+      live_only_tabs   / canon_only_tabs   / conflict_tabs
+    """
+    lg = live.get("groups", {})
+    lt = live.get("tabs", {})
+    cg = canonical.get("groups", {})
+    ct = canonical.get("tabs", {})
+
+    live_only_groups  = set(lg) - set(cg)
+    canon_only_groups = set(cg) - set(lg)
+    conflict_groups   = {
+        guid for guid in (set(lg) & set(cg))
+        if (lg[guid].get("title") != cg[guid].get("title") or
+            lg[guid].get("color") != cg[guid].get("color"))
+    }
+
+    live_only_tabs  = set(lt) - set(ct)
+    canon_only_tabs = set(ct) - set(lt)
+    conflict_tabs   = {
+        guid for guid in (set(lt) & set(ct))
+        if (lt[guid].get("url")        != ct[guid].get("url") or
+            lt[guid].get("title")      != ct[guid].get("title") or
+            lt[guid].get("group_guid") != ct[guid].get("group_guid"))
+    }
+
+    return {
+        "live_only_groups":  live_only_groups,
+        "canon_only_groups": canon_only_groups,
+        "conflict_groups":   conflict_groups,
+        "live_only_tabs":    live_only_tabs,
+        "canon_only_tabs":   canon_only_tabs,
+        "conflict_tabs":     conflict_tabs,
+    }
+
+
+def _merge_tab_groups(live: dict, canonical: dict, selections: list) -> dict:
+    """Build a merged tab-group state from interactive TUI selections.
+
+    selections: list of dicts with keys:
+      type        "group" | "tab"
+      guid        str
+      source      "local" | "canonical" | "conflict"
+      keep        bool  — for local/canonical: include; for conflict: keep live version
+      keep_theirs bool  — conflict only: True → use canonical version
+    """
+    lg = live.get("groups", {})
+    lt = live.get("tabs", {})
+    cg = canonical.get("groups", {})
+    ct = canonical.get("tabs", {})
+
+    divergent_group_guids = {s["guid"] for s in selections if s["type"] == "group"}
+    divergent_tab_guids   = {s["guid"] for s in selections if s["type"] == "tab"}
+
+    merged_groups: dict = {}
+    merged_tabs:   dict = {}
+
+    # Unchanged groups (same in both; use live copy)
+    for guid in (set(lg) | set(cg)) - divergent_group_guids:
+        merged_groups[guid] = lg[guid] if guid in lg else cg[guid]
+
+    # Divergent groups from TUI selections
+    for sel in selections:
+        if sel["type"] != "group":
+            continue
+        guid = sel["guid"]
+        if sel["source"] == "conflict":
+            if sel.get("keep_theirs") and guid in cg:
+                merged_groups[guid] = cg[guid]
+            elif sel.get("keep") and guid in lg:
+                merged_groups[guid] = lg[guid]
+        elif sel.get("keep"):
+            pool = lg if sel["source"] == "local" else cg
+            if guid in pool:
+                merged_groups[guid] = pool[guid]
+
+    # Unchanged tabs
+    for guid in (set(lt) | set(ct)) - divergent_tab_guids:
+        merged_tabs[guid] = lt[guid] if guid in lt else ct[guid]
+
+    # Divergent tabs from TUI selections
+    for sel in selections:
+        if sel["type"] != "tab":
+            continue
+        guid = sel["guid"]
+        if sel["source"] == "conflict":
+            if sel.get("keep_theirs") and guid in ct:
+                merged_tabs[guid] = ct[guid]
+            elif sel.get("keep") and guid in lt:
+                merged_tabs[guid] = lt[guid]
+        elif sel.get("keep"):
+            pool = lt if sel["source"] == "local" else ct
+            if guid in pool:
+                merged_tabs[guid] = pool[guid]
+
+    return {"groups": merged_groups, "tabs": merged_tabs}
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Commands
 # ──────────────────────────────────────────────────────────────────────────
 
-def cmd_setup(args) -> int:
+def cmd_setup(args: argparse.Namespace) -> int:
     """Interactive first-time setup.
 
     Branches automatically:
@@ -427,7 +529,7 @@ def _ask(prompt: str, default: str = "") -> str:
     return answer or default
 
 
-def cmd_status(args) -> int:
+def cmd_status(args: argparse.Namespace) -> int:
     print(f"Repo:    {REPO_ROOT}")
     print(f"Profile: {args.profile}")
     print(f"Host:    {hostname()}")
@@ -481,7 +583,7 @@ def cmd_status(args) -> int:
     return 0
 
 
-def cmd_diff(args) -> int:
+def cmd_diff(args: argparse.Namespace) -> int:
     """Show a human-readable diff between live profile and canonical state."""
     print(f"Repo:    {REPO_ROOT}")
     print(f"Profile: {args.profile}")
@@ -572,7 +674,7 @@ def _print_bookmark_diff(live: dict, canonical: dict) -> None:
         print(f"    + [{path}] {live_urls[(path, url)]} ({url})")
 
 
-def cmd_doctor(args) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
     failures = 0
     warnings = 0
 
@@ -659,7 +761,7 @@ def cmd_doctor(args) -> int:
     return 0
 
 
-def cmd_version(args) -> int:
+def cmd_version(args: argparse.Namespace) -> int:
     tool = _leveldb_writer_path()
     print(f"helium-sync {_app_version()}")
     print(f"git revision: {_git_revision()}")
@@ -1197,7 +1299,18 @@ def cmd_restore(args) -> int:
     return 0
 
 
-def cmd_resolve(args) -> int:
+def cmd_resolve(args: argparse.Namespace) -> int:
+    """Dispatch to bookmark or tab-group interactive resolver."""
+    target = getattr(args, "target", None) or "bookmarks"
+    if target == "bookmarks":
+        return _resolve_bookmarks(args)
+    if target == "saved_tab_groups":
+        return _resolve_tab_groups(args)
+    print(f"resolve: unknown target '{target}' (choose: bookmarks, saved_tab_groups)")
+    return 1
+
+
+def _resolve_bookmarks(args: argparse.Namespace) -> int:
     """Interactively merge divergent bookmark states."""
     import msvcrt
 
@@ -1418,17 +1531,12 @@ def cmd_resolve(args) -> int:
         "version": live_data.get("version", 1),
     }
 
-    # Backup before write
     backup_root = LOGS_DIR / f"preSync.{now_stamp()}"
-    backup_root.mkdir(parents=True, exist_ok=True)
-    bm_file = args.profile / "Bookmarks"
-    if bm_file.exists():
-        shutil.copy2(str(bm_file), str(backup_root / "Bookmarks"))
-
+    bm_target = next(t for t in ALL_TARGETS if t.name == "bookmarks")
     try:
-        _apply_bookmarks(args.profile, merged, backup_root)
+        bm_target.apply(args.profile, merged, backup_root)
     except Exception as e:
-        print(f"failed to write merged bookmarks: {e}")
+        print(f"\nfailed to write merged bookmarks: {e}")
         return 2
 
     kept_local = sum(1 for i in items if i["source"] == "local" and i["keep"])
@@ -1468,6 +1576,231 @@ def _merge_bookmark_tree(node, live_urls, theirs_urls, items):
     return new_node
 
 
+def _resolve_tab_groups(args: argparse.Namespace) -> int:
+    """Interactively merge divergent saved tab group states."""
+    import msvcrt
+
+    if helium_running():
+        print("ERROR: Helium is running on this device.")
+        print("Tab group resolve writes to the live profile; close Helium first.")
+        return 4
+
+    if args.theirs:
+        theirs_path = Path(args.theirs).expanduser().resolve()
+        if not theirs_path.exists():
+            print(f"file not found: {theirs_path}")
+            return 1
+        try:
+            theirs_data = json.loads(theirs_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"cannot parse file: {e}")
+            return 1
+    else:
+        state_file = STATE_DIR / "saved_tab_groups.json"
+        if not state_file.exists():
+            print("no canonical saved tab groups state -- nothing to resolve against")
+            return 1
+        theirs_data = json.loads(state_file.read_text())
+
+    stg_target = next((t for t in ALL_TARGETS if t.name == "saved_tab_groups"), None)
+    if stg_target is None:
+        print("saved_tab_groups target not available")
+        return 1
+    try:
+        live_data = stg_target.extract(args.profile)
+    except Exception as e:
+        print(f"cannot extract live saved tab groups: {e}")
+        return 2
+
+    divs = _tab_group_divergences(live_data, theirs_data)
+    live_only_groups  = divs["live_only_groups"]
+    canon_only_groups = divs["canon_only_groups"]
+    conflict_groups   = divs["conflict_groups"]
+    live_only_tabs    = divs["live_only_tabs"]
+    canon_only_tabs   = divs["canon_only_tabs"]
+    conflict_tabs     = divs["conflict_tabs"]
+
+    total_divs = (len(live_only_groups) + len(canon_only_groups) + len(conflict_groups) +
+                  len(live_only_tabs) + len(canon_only_tabs) + len(conflict_tabs))
+
+    if total_divs == 0:
+        print("no divergences found -- live and canonical are identical")
+        return 0
+
+    print("divergences found:")
+    print(f"  groups only on this device: {len(live_only_groups)}")
+    print(f"  groups only in canonical:   {len(canon_only_groups)}")
+    print(f"  group conflicts:            {len(conflict_groups)}")
+    print(f"  tabs only on this device:   {len(live_only_tabs)}")
+    print(f"  tabs only in canonical:     {len(canon_only_tabs)}")
+    print(f"  tab conflicts:              {len(conflict_tabs)}")
+    print()
+
+    if not sys.stdin.isatty():
+        print("(resolve requires an interactive terminal)")
+        print("Run: helium-sync pull --dry-run   to see what would change")
+        return 1
+
+    lg = live_data["groups"]
+    cg = theirs_data["groups"]
+    lt = live_data["tabs"]
+    ct = theirs_data["tabs"]
+
+    def _tab_count(group_guid: str, tabs: dict) -> int:
+        return sum(1 for t in tabs.values() if t.get("group_guid") == group_guid)
+
+    def _group_title(group_guid: str, groups: dict) -> str:
+        return groups.get(group_guid, {}).get("title", "?")
+
+    items: list = []
+
+    for guid in sorted(live_only_groups):
+        g = lg[guid]
+        items.append({"type": "group", "guid": guid,
+                      "title": g.get("title", "(untitled)"),
+                      "n_tabs": _tab_count(guid, lt),
+                      "source": "local", "keep": True, "conflict": False})
+    for guid in sorted(canon_only_groups):
+        g = cg[guid]
+        items.append({"type": "group", "guid": guid,
+                      "title": g.get("title", "(untitled)"),
+                      "n_tabs": _tab_count(guid, ct),
+                      "source": "canonical", "keep": True, "conflict": False})
+    for guid in sorted(conflict_groups):
+        items.append({"type": "group", "guid": guid,
+                      "title":        lg[guid].get("title", "(untitled)"),
+                      "theirs_title": cg[guid].get("title", "(untitled)"),
+                      "n_tabs": _tab_count(guid, lt),
+                      "source": "conflict", "keep": True, "keep_theirs": False, "conflict": True})
+
+    for guid in sorted(live_only_tabs):
+        t = lt[guid]
+        items.append({"type": "tab", "guid": guid,
+                      "title": t.get("title", "(untitled)"),
+                      "url":   t.get("url", ""),
+                      "group_title": _group_title(t.get("group_guid", ""), lg),
+                      "source": "local", "keep": True, "conflict": False})
+    for guid in sorted(canon_only_tabs):
+        t = ct[guid]
+        items.append({"type": "tab", "guid": guid,
+                      "title": t.get("title", "(untitled)"),
+                      "url":   t.get("url", ""),
+                      "group_title": _group_title(t.get("group_guid", ""), cg),
+                      "source": "canonical", "keep": True, "conflict": False})
+    for guid in sorted(conflict_tabs):
+        tl, tc2 = lt[guid], ct[guid]
+        items.append({"type": "tab", "guid": guid,
+                      "title":        tl.get("title", "(untitled)"),
+                      "theirs_title": tc2.get("title", "(untitled)"),
+                      "url":          tl.get("url", ""),
+                      "theirs_url":   tc2.get("url", ""),
+                      "group_title": _group_title(tl.get("group_guid", ""), lg),
+                      "source": "conflict", "keep": True, "keep_theirs": False, "conflict": True})
+
+    cursor = 0
+    width = 72
+
+    RESET  = '\033[0m'  if os.environ.get('WT_SESSION') or os.environ.get('TERM') else ''
+    GREEN  = '\033[32m' if RESET else ''
+    CYAN   = '\033[36m' if RESET else ''
+    YELLOW = '\033[33m' if RESET else ''
+    BOLD   = '\033[1m'  if RESET else ''
+    DIM    = '\033[2m'  if RESET else ''
+
+    def _trunc(s: str, n: int = 55) -> str:
+        return s if len(s) <= n else '...' + s[-(n - 3):]
+
+    def _render_tab_groups():
+        os.system("cls" if os.name == "nt" else "clear")
+        print(f'{BOLD}Resolve saved tab group divergences{RESET}')
+        print(f'{DIM}↑↓ navigate  Space toggle  Enter apply  Q quit{RESET}')
+        print('─' * width)
+
+        kept = 0
+        for i, item in enumerate(items):
+            is_cur = i == cursor
+            arrow  = f'{BOLD}▼{RESET} ' if is_cur else '  '
+            prefix = f'{YELLOW}G{RESET}' if item["type"] == "group" else f'{CYAN}T{RESET}'
+
+            if item["conflict"]:
+                lsel = f'{GREEN}[x]{RESET}' if item["keep"]             else f'{DIM}[ ]{RESET}'
+                rsel = f'{CYAN}[x]{RESET}'  if item.get("keep_theirs") else f'{DIM}[ ]{RESET}'
+                if item["keep"] or item.get("keep_theirs"):
+                    kept += 1
+                if item["type"] == "group":
+                    print(f'{arrow}{prefix} {lsel} {GREEN}local{RESET}:  {item["title"]}  ({item["n_tabs"]} tabs)')
+                    print(f'     {rsel} {CYAN}remote{RESET}: {item["theirs_title"]}')
+                else:
+                    print(f'{arrow}{prefix} {lsel} {GREEN}local{RESET}:  {item["title"]}')
+                    print(f'       {DIM}{_trunc(item["url"])}{RESET}')
+                    print(f'     {rsel} {CYAN}remote{RESET}: {item["theirs_title"]}')
+                    print(f'       {DIM}{_trunc(item["theirs_url"])}{RESET}')
+            else:
+                if item["source"] == "local":
+                    tag = f'{GREEN}local{RESET}'
+                    sel = f'{GREEN}[x]{RESET}' if item["keep"] else f'{DIM}[ ]{RESET}'
+                else:
+                    tag = f'{CYAN}remote{RESET}'
+                    sel = f'{CYAN}[x]{RESET}' if item["keep"] else f'{DIM}[ ]{RESET}'
+                if item["keep"]:
+                    kept += 1
+                if item["type"] == "group":
+                    print(f'{arrow}{prefix} {sel}  {tag}  {item["title"]}  ({item["n_tabs"]} tabs)')
+                else:
+                    grp = f'{DIM}group: {item["group_title"]}{RESET}' if RESET else f'group: {item["group_title"]}'
+                    print(f'{arrow}{prefix} {sel}  {tag}  {item["title"]}  [{grp}]')
+                    print(f'       {DIM}{_trunc(item["url"])}{RESET}')
+
+            if i < len(items) - 1:
+                print()
+
+        print('─' * width)
+        print(f'{kept}/{len(items)} items selected  {BOLD}Enter{RESET} to apply  {BOLD}Q{RESET} to cancel')
+
+    _render_tab_groups()
+    while True:
+        try:
+            key = msvcrt.getch()
+        except (KeyboardInterrupt, EOFError):
+            print("\naborted")
+            return 7
+
+        if key == b"\xe0":
+            key = msvcrt.getch()
+            if key == b"H" and cursor > 0:
+                cursor -= 1
+            elif key == b"P" and cursor < len(items) - 1:
+                cursor += 1
+        elif key == b" ":
+            item = items[cursor]
+            if item["conflict"]:
+                item["keep_theirs"] = not item.get("keep_theirs", False)
+            else:
+                item["keep"] = not item["keep"]
+        elif key in (b"\r", b"\n"):
+            break
+        elif key.lower() == b"q":
+            print("\nresolve cancelled — no changes applied")
+            return 0
+        _render_tab_groups()
+
+    merged = _merge_tab_groups(live_data, theirs_data, items)
+
+    backup_root = LOGS_DIR / f"preSync.{now_stamp()}"
+    try:
+        stg_target.apply(args.profile, merged, backup_root)
+    except Exception as e:
+        print(f"\nfailed to write merged tab groups: {e}")
+        return 2
+
+    kept_local  = sum(1 for i in items if i["source"] == "local"     and i["keep"])
+    kept_canon  = sum(1 for i in items if i["source"] == "canonical" and i["keep"])
+    n_conflicts = sum(1 for i in items if i["source"] == "conflict"  and (i["keep"] or i.get("keep_theirs")))
+    print(f"\nresolved: kept {kept_local} local + {kept_canon} canonical, {n_conflicts} conflicts resolved")
+    print(f"backup: {backup_root.relative_to(REPO_ROOT)}")
+    return 0
+
+
 def cmd_completion(args) -> int:
     """Generate shell completion script."""
     subs = ["setup", "push", "pull", "status", "diff", "doctor", "version",
@@ -1489,7 +1822,7 @@ def cmd_completion(args) -> int:
         "export": ["--output", "--target", "--profile", "--repo"],
         "import": ["--allow-helium-running", "--target", "--profile", "--repo"],
         "restore": ["--allow-helium-running", "--profile", "--repo"],
-        "resolve": ["--theirs", "--profile", "--repo"],
+        "resolve": ["--target", "--theirs", "--profile", "--repo"],
         "completion": ["--shell", "--profile", "--repo"],
     }
 
@@ -1638,9 +1971,12 @@ def main() -> int:
     p_restore.add_argument("--allow-helium-running", action="store_true",
                             help="DANGEROUS -- bypass the running-browser guard")
 
-    p_resolve = sub.add_parser("resolve", help="interactively merge divergent bookmark states")
+    p_resolve = sub.add_parser("resolve", help="interactively merge divergent states")
+    p_resolve.add_argument("--target", type=str, default="bookmarks",
+                            choices=["bookmarks", "saved_tab_groups"],
+                            help="which target to resolve (default: bookmarks)")
     p_resolve.add_argument("--theirs", type=str, default=None,
-                            help="path to theirs canonical JSON")
+                            help="path to canonical JSON to resolve against")
 
     p_completion = sub.add_parser("completion", help="generate shell completion script")
     p_completion.add_argument("--shell", required=True, choices=["powershell", "cmd"],
