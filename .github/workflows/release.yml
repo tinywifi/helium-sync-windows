@@ -2,10 +2,10 @@ name: release
 
 # Triggered when a `v*` tag is pushed (e.g., `v0.1.0`).
 # Produces:
-#   leveldb-writer-windows-amd64.exe  — standalone binary (amd64)
-#   leveldb-writer-windows-arm64.exe  — standalone binary (arm64)
-#   helium-sync-windows-{tag}-amd64.zip  — Scoop / manual install (amd64)
-#   helium-sync-windows-{tag}-arm64.zip  — Scoop / manual install (arm64)
+#   leveldb-writer-windows-amd64.exe - standalone binary (amd64)
+#   leveldb-writer-windows-arm64.exe - standalone binary (arm64)
+#   helium-sync-windows-{tag}-amd64.zip - Scoop / manual install (amd64)
+#   helium-sync-windows-{tag}-arm64.zip - Scoop / manual install (arm64)
 
 on:
   push:
@@ -25,6 +25,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
+          cache-dependency-path: bin/_go/leveldb_writer/go.sum
 
       - name: build leveldb-writer for amd64 and arm64
         shell: pwsh
@@ -85,3 +86,37 @@ jobs:
             dist/helium-sync-windows-*-arm64.zip
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+      - name: checkout scoop-bucket
+        uses: actions/checkout@v4
+        with:
+          repository: tinywifi/scoop-bucket
+          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          path: bucket-repo
+
+      - name: publish Scoop manifest
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag.TrimStart("v")
+          $repo = "tinywifi/helium-sync-windows"
+          $base = "https://github.com/$repo/releases/download/$tag"
+          $manifestPath = "bucket-repo\bucket\helium-sync.json"
+
+          $amdSha = (Get-FileHash "dist\helium-sync-windows-$tag-amd64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $armSha = (Get-FileHash "dist\helium-sync-windows-$tag-arm64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $manifest.version = $version
+          $manifest.architecture."64bit".url = "$base/helium-sync-windows-$tag-amd64.zip"
+          $manifest.architecture."64bit".hash = "sha256:$amdSha"
+          $manifest.architecture.arm64.url = "$base/helium-sync-windows-$tag-arm64.zip"
+          $manifest.architecture.arm64.hash = "sha256:$armSha"
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content $manifestPath -Encoding utf8
+
+          Set-Location bucket-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/helium-sync.json
+          git commit -m "helium-sync $tag"
+          git push origin HEAD:main
