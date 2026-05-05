@@ -108,12 +108,6 @@ func run(args []string) int {
 		allow := fs.Bool("allow-helium-running", false, "bypass running-browser guard")
 		_ = fs.Parse(rest[1:])
 		return app.Restore(*allow)
-	case "resolve":
-		fs := flag.NewFlagSet("resolve", flag.ContinueOnError)
-		target := fs.String("target", "bookmarks", "target to resolve")
-		theirs := fs.String("theirs", "", "canonical JSON file")
-		_ = fs.Parse(rest[1:])
-		return app.Resolve(*target, *theirs)
 	case "completion":
 		fs := flag.NewFlagSet("completion", flag.ContinueOnError)
 		shell := fs.String("shell", "", "powershell or cmd")

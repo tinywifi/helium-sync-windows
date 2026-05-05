@@ -38,7 +38,6 @@ func UsageScreen() string {
 		"export       write a portable backup JSON",
 		"import       apply a portable backup JSON",
 		"restore      restore from the latest backup log",
-		"resolve      inspect and choose bookmark changes",
 		"completion   print shell completion scripts",
 	}
 	body := append([]string{

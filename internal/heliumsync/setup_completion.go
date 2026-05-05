@@ -119,7 +119,7 @@ func confirm(title string, defaultValue bool) bool {
 }
 
 func (a App) Completion(shell string) int {
-	subs := []string{"setup", "push", "pull", "status", "diff", "doctor", "version", "log", "gc", "init", "adopt", "export", "import", "restore", "resolve", "completion"}
+	subs := []string{"setup", "push", "pull", "status", "diff", "doctor", "version", "log", "gc", "init", "adopt", "export", "import", "restore", "completion"}
 	flags := map[string][]string{
 		"setup":      {"--force", "--profile", "--repo"},
 		"push":       {"--target", "--strict", "--dry-run", "--profile", "--repo"},
@@ -134,7 +134,6 @@ func (a App) Completion(shell string) int {
 		"export":     {"--output", "--target", "--profile", "--repo"},
 		"import":     {"--allow-helium-running", "--target", "--profile", "--repo"},
 		"restore":    {"--allow-helium-running", "--profile", "--repo"},
-		"resolve":    {"--target", "--theirs", "--profile", "--repo"},
 		"completion": {"--shell", "--profile", "--repo"},
 	}
 	if shell == "cmd" {

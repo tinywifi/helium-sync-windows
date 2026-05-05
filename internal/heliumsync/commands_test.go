@@ -179,29 +179,7 @@ func TestSetupAlreadyConfiguredShowsRepo(t *testing.T) {
 	}
 }
 
-func TestResolveNonTTYAndTreeNodes(t *testing.T) {
-	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	profile := filepath.Join(tmp, "profile")
-	_ = os.MkdirAll(filepath.Join(repo, "state"), 0755)
-	live := bookmarkTree([]any{urlNode("Live", "https://live")})
-	canonical := bookmarkTree([]any{urlNode("Canonical", "https://canonical")})
-	seedProfile(t, profile, live)
-	raw, _ := json.Marshal(canonical)
-	_ = os.WriteFile(filepath.Join(repo, "state", "bookmarks.json"), raw, 0644)
-	app := New(repo, profile)
-	app.Targets = []Target{Bookmarks{}}
 
-	t.Setenv("CI", "1")
-	rc, out := captureOutput(t, func() int { return app.Resolve("bookmarks", "") })
-	if rc != 1 || !strings.Contains(out, "interactive terminal") {
-		t.Fatalf("unexpected resolve rc=%d out=%s", rc, out)
-	}
-	nodes := resolveTreeNodes("bookmarks", live, canonical)
-	if len(nodes) != 1 || len(nodes[0].Children) != 2 {
-		t.Fatalf("expected tree root with local/canonical children: %#v", nodes)
-	}
-}
 
 func TestBookmarkResolveRowsAndMerge(t *testing.T) {
 	live := bookmarkTree([]any{
@@ -241,7 +219,7 @@ func TestBookmarkResolveRowsAndMerge(t *testing.T) {
 
 func TestUsageAndVersionScreens(t *testing.T) {
 	usage := UsageScreen()
-	if !strings.Contains(usage, "resolve") || !strings.Contains(usage, "completion") || !strings.Contains(usage, "Windows fork") {
+	if !strings.Contains(usage, "completion") || !strings.Contains(usage, "Windows fork") {
 		t.Fatalf("unexpected usage screen: %s", usage)
 	}
 	version := VersionScreen("1.0.0", "abc123", "windows/amd64 go1.26.2")

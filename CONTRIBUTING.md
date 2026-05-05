@@ -20,9 +20,8 @@ bin\helium-sync.bat doctor
 - `internal/heliumsync/status_diff.go`: `status`, `diff`, and bookmark diff formatting.
 - `internal/heliumsync/export_import.go`: portable JSON export/import.
 - `internal/heliumsync/maintenance.go`: `doctor`, `version`, `log`, `gc`, `init`, `adopt`, `restore`.
-- `internal/heliumsync/setup_completion.go`: first-run setup and shell completion output.
-- `internal/heliumsync/resolve.go`: Bubble Tea resolver UI.
-- `internal/heliumsync/bookmarks.go`: bookmarks target.
+	- `internal/heliumsync/setup_completion.go`: first-run setup and shell completion output.
+	- `internal/heliumsync/bookmarks.go`: bookmarks target.
 - `internal/heliumsync/bookmark_tree.go`: bookmark tree walking and semantic comparison helpers.
 - `internal/heliumsync/saved_tab_groups.go`: saved tab groups target.
 - `internal/heliumsync/leveldb.go`: LevelDB copy/read support.

@@ -80,9 +80,8 @@ helium-sync init --force
 helium-sync adopt --yes
 helium-sync push --dry-run
 helium-sync pull --dry-run
-helium-sync restore
-helium-sync resolve --target bookmarks
-helium-sync gc --keep-days 30
+		helium-sync restore
+		helium-sync gc --keep-days 30
 ```
 
 Shared flags:
